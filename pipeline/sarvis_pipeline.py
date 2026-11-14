@@ -82,14 +82,15 @@ SITES = {
         "site_height_m": 60.0,
     },
 }
-SITE = os.environ.get("SARVIS_SITE", "portuguese-bend")
+FIRST_RUN = True         # True = quick gate run: Central Valley, 3 pairs, no Sentinel-1. Set False for the full run.
+SITE = os.environ.get("SARVIS_SITE", "central-valley" if FIRST_RUN else "portuguese-bend")
 SHORT_NAME = "NISAR_L2_GUNW_PROVISIONAL_V1"
 COH_MIN = 0.3            # pixels below this coherence are dropped for that pair
 USE_MASK = False         # see cell 4 before turning on
 APPLY_IONO = False       # subtract the product's ionosphere phase screen (not applied by NASA by default)
 PHASE_SIGN = -1.0        # CHECK in cell 6. displacement_toward_satellite = PHASE_SIGN * phase * wavelength / (4 pi)
-MAX_PAIRS = None         # set to 3 for the first timing test
-RUN_RAIN, RUN_GNSS, RUN_S1 = True, True, True   # part 2 steps; turn one off if it blocks you
+MAX_PAIRS = 3 if (FIRST_RUN and not SYNTH) else None
+RUN_RAIN, RUN_GNSS, RUN_S1 = True, True, not (FIRST_RUN and not SYNTH)   # part 2 steps; turn one off if it blocks you
 S1_SIGN = 1.0            # CHECK in cell 10, same test as PHASE_SIGN: sinking ground must be negative
 SURVEY_CSV = None        # optional on-slide survey points: columns id,lat,lon,date(YYYYMMDD),east_cm,north_cm,up_cm
 WORKERS = 4

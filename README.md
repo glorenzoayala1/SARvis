@@ -12,7 +12,7 @@ for Portuguese Bend (landslide) and the Central Valley near Corcoran (subsidence
 - `app/`: Next.js + MapLibre viewer. Reads `app/public/data/<site>/`.
 
 ## Run the pipeline (Colab)
-1. Upload the notebook to Colab. Run cell 1 and 2. Set `MAX_PAIRS = 3` for the first run.
+1. Open the notebook in Colab and run all. `FIRST_RUN = True` (cell 2) does the quick gate run: Central Valley, 3 pairs, no Sentinel-1.
 2. Cell 3 asks for your Earthdata login.
 3. Cell 4 is the timing gate: one cropped pair should come back in well under 2 minutes.
 4. Run the Central Valley site first (`SITE = "central-valley"`) and do the sign check in cell 6.

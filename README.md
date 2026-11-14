@@ -19,6 +19,15 @@ for Portuguese Bend (landslide) and the Central Valley near Corcoran (subsidence
 5. Set `MAX_PAIRS = None`, run both sites, download each `<site>.zip` and unzip into `app/public/data/<site>/`.
 6. If a part-2 step blocks you, set `RUN_RAIN`, `RUN_GNSS` or `RUN_S1` to False and keep going.
 
+## Sites
+- `portuguese-bend`: slow landslide, a year of 12-day pairs, compared with Sentinel-1 and GPS.
+- `central-valley`: groundwater-driven sinking and rebound.
+- `destin`: Hurricane Isaias (landfall reported 9 Oct 2026). Adds a "storm change" layer: the drop in radar
+  coherence across the pair of passes that brackets the landfall, relative to the calm pairs before it.
+  Only about 5 pairs per track, so it runs in a couple of minutes. Set `SITE = "destin"` in cell 2.
+  The landfall details come from one news report of preliminary National Hurricane Center figures; confirm them
+  against nhc.noaa.gov before presenting.
+
 ## Run the app
     cd app && npm install && npm run dev      # http://localhost:3000
     npm run build                             # static site in app/out, deploy to Vercel

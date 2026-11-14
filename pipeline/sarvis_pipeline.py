@@ -59,6 +59,8 @@ from pyproj import Transformer
 SITES = {
     "portuguese-bend": {
         "name": "Portuguese Bend landslide, Rancho Palos Verdes, CA",
+        "emoji": "\u26f0\ufe0f", "short": "Portuguese Bend",
+        "story": "A hillside neighbourhood sliding slowly toward the ocean. Rain soaks in and the ground speeds up.",
         "bbox": (-118.420, 33.715, -118.320, 33.790),
         "ref_box": (-118.385, 33.770, -118.365, 33.785),     # contains continuous GPS station PVHS
         "focus_box": (-118.385, 33.733, -118.350, 33.752),   # CHECK: rough box around the active slide
@@ -72,6 +74,8 @@ SITES = {
     },
     "central-valley": {
         "name": "Central Valley subsidence near Corcoran, CA",
+        "emoji": "\U0001f33e", "short": "Central Valley",
+        "story": "Farmland that sinks when groundwater is pumped out and rebounds a little when it rains.",
         "bbox": (-119.750, 36.000, -119.400, 36.250),
         "ref_box": (-119.440, 36.210, -119.410, 36.240),
         "focus_box": (-119.700, 36.050, -119.500, 36.200),
@@ -83,9 +87,29 @@ SITES = {
         ],
         "site_height_m": 60.0,
     },
+    "destin": {
+        "name": "Hurricane Isaias landfall near Destin, FL",
+        "emoji": "\U0001f300", "short": "Destin hurricane",
+        "story": "A hurricane came ashore here in October 2026. Radar passes before and after show where the surface changed.",
+        "bbox": (-86.750, 30.330, -86.300, 30.550),
+        "ref_box": (-86.600, 30.500, -86.500, 30.540),       # CHECK: first guess at undisturbed inland ground
+        "focus_box": (-86.650, 30.370, -86.400, 30.430),     # CHECK: the coastal strip around Destin
+        "gnss_ref": None,
+        "deramp": True,
+        "tracks": [  # both confirmed in CMR on 2026-11-14, with pairs that bracket the landfall
+            {"id": "asc", "track": 76, "dir": "A", "frame": 17},
+            {"id": "desc", "track": 127, "dir": "D", "frame": 73},
+        ],
+        "site_height_m": 5.0,
+        "start": "20260801", "end": "20261101",              # only the passes around the storm
+        "s1": False,                                         # OPERA DISP-S1 stops around March 2026 here
+        "event": {"name": "Hurricane Isaias", "utc": "20261010", "when": "evening of 9 October 2026 (local time)",
+                  "note": "Landfall near Destin with 105 mph sustained winds. Preliminary National Hurricane Center "
+                          "figures as reported by Econews on 2 Nov 2026; the final storm report is not out yet."},
+    },
 }
 FIRST_RUN = False        # True = quick gate run: Central Valley, 3 pairs, no Sentinel-1. False = full run of SITE below.
-SITE = os.environ.get("SARVIS_SITE", "central-valley" if FIRST_RUN else "portuguese-bend")
+SITE = os.environ.get("SARVIS_SITE", "central-valley" if FIRST_RUN else "portuguese-bend")      # or "central-valley" or "destin"
 SHORT_NAME = "NISAR_L2_GUNW_PROVISIONAL_V1"
 COH_MIN = 0.3            # pixels below this coherence are dropped for that pair
 USE_MASK = True          # drop water and invalid-subswath pixels (low byte of the mask layer, see cell 4)
@@ -140,7 +164,8 @@ else:
     fs = earthaccess.get_fsspec_https_session()
     open_file = lambda u: h5py.File(fs.open(u, **FSSPEC), "r")
 
-pairs = {tr["id"]: pick(urls, tr)[:MAX_PAIRS] for tr in cfg["tracks"]}
+pairs = {tr["id"]: [p for p in pick(urls, tr) if p[0] >= cfg.get("start", "0") and p[1] <= cfg.get("end", "9")][:MAX_PAIRS]
+         for tr in cfg["tracks"]}
 for k, v in pairs.items():
     print(k, len(v), "pairs", v[0][:2] if v else "", "->", v[-1][:2] if v else "")
     for a, b in zip(v[:-1], v[1:]):
@@ -305,7 +330,8 @@ for tr in cfg["tracks"]:
     filled = np.where(okp, disp, rate[None] * days)
     cum = np.concatenate([np.zeros((1, ny, nx), "f4"), np.cumsum(filled, axis=0)]).astype("f4")
     cum[:, ~keep] = np.nan
-    stacks[tr["id"]] = {"dates": dates, "pairs": disp, "cum": cum, "coh": coh,
+    stacks[tr["id"]] = {"dates": dates, "pairs": disp, "cum": cum, "coh": coh, "plist": plist,
+                        "water": np.all(bad & (np.array(coh) >= 0), axis=0) if USE_MASK else None,
                         "enu": los_enu(data[0]), "lam_cm": lam_cm, "iono_applied": bool(use_ion),
                         "gap_filled_frac": float((~okp)[:, keep].mean()) if keep.any() else 0.0,
                         "valid_frac": float(keep.mean())}
@@ -360,7 +386,8 @@ if {"asc", "desc"} <= set(stacks):
     layers["up"] = {"dates": cd, "data": up, "sensor": "nisar", "kind": "up", "label": "NISAR vertical (+ up)"}
     layers["east"] = {"dates": cd, "data": east, "sensor": "nisar", "kind": "east", "label": "NISAR east-west (+ east)"}
     print("decomposition determinant %.2f (near 0 would mean the two views are too similar)" % det)
-context = {}
+context = {"coverage": {"focus_box": list(cfg["focus_box"]),
+                        "nisar": {k: round(float(np.isfinite(v["pairs"]).all(axis=0)[FOCUS].mean()), 3) for k, v in stacks.items()}, "s1": {}}}
 all_dates = sorted({d for L in layers.values() for d in L["dates"]})
 D0, D1 = all_dates[0], all_dates[-1]
 
@@ -461,6 +488,7 @@ def read_los_tif(src):
         e, n, u = [float(v) for v in next(r.sample([(px, py)]))]
     return (e, n, u) if u > 0 else (-e, -n, -u)        # make it ground -> satellite
 
+RUN_S1 = RUN_S1 and cfg.get("s1", True)
 if RUN_S1:
     if SYNTH:
         sdir = Path(os.environ["SARVIS_SYNTH_S1_DIR"])
@@ -515,14 +543,45 @@ if RUN_S1:
         layers["s1_east"] = {"dates": cd, "data": east, "sensor": "s1", "kind": "east", "label": "Sentinel-1 east-west (+ east)"}
     # Coverage: share of focus-box pixels that keep a measurement on every date.
     cov = lambda cum: round(float(np.isfinite(cum).all(axis=0)[FOCUS].mean()), 3)
-    context["coverage"] = {"focus_box": list(cfg["focus_box"]),
-                           "nisar": {k: cov(v["pairs"]) for k, v in stacks.items()},
-                           "s1": {k: cov(v["cum"]) for k, v in s1.items()}}
+    context["coverage"]["s1"] = {k: cov(v["cum"]) for k, v in s1.items()}
     print("share of focus-box pixels measured on every date:", context["coverage"])
 
 # %%
+# 10b. Storm impact (only for sites with an "event"). Radar coherence ("signal quality") drops wherever the
+#      surface changed between two passes: flooding, fallen trees, damaged roofs, moved sand. For each track,
+#      compare the pair that brackets the event with the usual level in the calm pairs before it.
+#      impact = usual coherence - storm-pair coherence (0 = no change, 1 = signal fully lost).
+#      Pixels that are never coherent (water, dense forest) cannot show a drop and are left blank.
+#      The combined layer takes the SMALLER of the two tracks, so a change must be seen from both directions.
+#      This is surface change, not a damage assessment: tides, crops and wet soil also lower coherence.
+static_layers = {}
+ev = cfg.get("event")
+if ev:
+    imp = {}
+    for k, s in stacks.items():
+        pre = [i for i, (a, b, _) in enumerate(s["plist"]) if b < ev["utc"]]
+        hit = [i for i, (a, b, _) in enumerate(s["plist"]) if a < ev["utc"] <= b]
+        if len(pre) < 2 or not hit:
+            print(k, "cannot compute impact: need 2+ calm pairs and one pair bracketing", ev["utc"], "| calm:", len(pre), "storm:", len(hit))
+            continue
+        base = np.nanmedian(s["coh"][pre], axis=0); spread = np.nanmax(s["coh"][pre], axis=0) - np.nanmin(s["coh"][pre], axis=0)
+        d = np.clip(base - s["coh"][hit[0]], 0, 1)
+        d[(base < COH_MIN) | ~np.isfinite(d)] = np.nan
+        imp[k] = d
+        s["storm_pair"] = hit[0]
+        print(k, "storm pair", s["plist"][hit[0]][:2], "| calm pairs", len(pre),
+              "| median coherence drop in focus box %.2f, elsewhere %.2f, usual calm-pair swing %.2f"
+              % (np.nanmedian(d[FOCUS]), np.nanmedian(d[~FOCUS]), np.nanmedian(spread)))
+        static_layers[k + "_impact"] = {"data": d, "kind": k + "_impact",
+                                        "label": f"NISAR {'ascending' if k == 'asc' else 'descending'} storm change (0-1)"}
+    if len(imp) == 2:
+        both = np.fmin(imp["asc"], imp["desc"]); both[~(np.isfinite(imp["asc"]) & np.isfinite(imp["desc"]))] = np.nan
+        static_layers = {"impact": {"data": both, "kind": "impact", "label": "Storm change seen from both directions (0-1)"}, **static_layers}
+
+# %%
 # 11. Export for the web app. Values are int16 hundredths of a cm, -32768 = no data, row 0 = north.
-meta = {"id": SITE, "name": cfg["name"], "bbox": [W, S, E, N], "nx": nx, "ny": ny,
+meta = {"id": SITE, "name": cfg["name"], "short": cfg.get("short", SITE), "emoji": cfg.get("emoji", ""), "story": cfg.get("story", ""),
+        "event": cfg.get("event"), "bbox": [W, S, E, N], "nx": nx, "ny": ny,
         "units": "cm", "scale": 0.01, "nodata": -32768, "ref_box": list(cfg["ref_box"]),
         "focus_box": list(cfg["focus_box"]),
         "synthetic": SYNTH, "source": SHORT_NAME, "coh_min": COH_MIN, "phase_sign": PHASE_SIGN,
@@ -532,7 +591,7 @@ meta = {"id": SITE, "name": cfg["name"], "bbox": [W, S, E, N], "nx": nx, "ny": n
         "los": {k: dict(zip("enu", [round(float(v), 3) for v in s["enu"]])) for k, s in stacks.items()},
         "wavelength_cm": {"nisar": round(float(next(iter(stacks.values()))["lam_cm"]), 2), "s1": 5.55},   # Sentinel-1: 5.405 GHz
         "layers": []}
-if RUN_S1:
+if RUN_S1 and s1:
     meta["los_s1"] = {k: dict(zip("enu", [round(float(v), 3) for v in s["enu"]])) for k, s in s1.items() if s["enu"]}
 for key, L in layers.items():
     q = np.where(np.isfinite(L["data"]), np.clip(np.rint(L["data"] / 0.01), -32767, 32767), -32768).astype("<i2")
@@ -545,6 +604,17 @@ for k, s in stacks.items():   # mean coherence: low = decorrelated (moving too f
     (np.clip(np.nanmean(s["coh"], axis=0), 0, 1) * 255).astype("u1").tofile(OUT / f"{k}_coh.u8")
     meta["layers"].append({"key": k + "_coh", "label": f"NISAR {k} mean coherence (0-1)", "file": f"{k}_coh.u8",
                            "static": True, "sensor": "nisar", "kind": "coh"})
+for key, L in static_layers.items():      # 0-250 = value 0-1, 255 = no data
+    np.where(np.isfinite(L["data"]), np.rint(np.clip(L["data"], 0, 1) * 250), 255).astype("u1").tofile(OUT / f"{key}.u8")
+    meta["layers"].insert(0, {"key": key, "label": L["label"], "file": f"{key}.u8", "static": True, "sensor": "nisar",
+                              "kind": L["kind"], "palette": "impact", "nodata": 255, "max": 250})
+if ev:
+    meta["default_layer"] = "impact" if "impact" in static_layers else None
+# Per-pass signal quality through time, for the chart (one value per pair, stamped with the later date)
+for k, s in stacks.items():
+    (np.clip(np.nan_to_num(s["coh"]), 0, 1) * 250).astype("u1").tofile(OUT / f"{k}_cohpairs.u8")
+meta["signal_series"] = {k: {"file": f"{k}_cohpairs.u8", "dates": [b for _, b, _ in s["plist"]],
+                             "starts": [a for a, _, _ in s["plist"]], "storm_pair": s.get("storm_pair")} for k, s in stacks.items()}
 (OUT / "meta.json").write_text(json.dumps(meta, indent=1))
 (OUT / "context.json").write_text(json.dumps(context))
 print("wrote", sorted(p.name for p in OUT.iterdir()))

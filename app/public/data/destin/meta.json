@@ -1,0 +1,223 @@
+{
+ "id": "destin",
+ "name": "Hurricane Isaias landfall near Destin, FL",
+ "short": "Destin hurricane",
+ "emoji": "\ud83c\udf00",
+ "story": "A hurricane came ashore here in October 2026. Radar passes before and after show where the surface changed.",
+ "event": {
+  "name": "Hurricane Isaias",
+  "utc": "20261010",
+  "when": "evening of 9 October 2026 (local time)",
+  "note": "Landfall near Destin with 105 mph sustained winds. Preliminary National Hurricane Center figures as reported by Econews on 2 Nov 2026; the final storm report is not out yet."
+ },
+ "bbox": [
+  -86.75,
+  30.33,
+  -86.3,
+  30.55
+ ],
+ "nx": 540,
+ "ny": 304,
+ "units": "cm",
+ "scale": 0.01,
+ "nodata": -32768,
+ "ref_box": [
+  -86.6,
+  30.5,
+  -86.5,
+  30.54
+ ],
+ "focus_box": [
+  -86.65,
+  30.37,
+  -86.4,
+  30.43
+ ],
+ "synthetic": true,
+ "source": "NISAR_L2_GUNW_PROVISIONAL_V1",
+ "coh_min": 0.3,
+ "phase_sign": -1.0,
+ "processing": {
+  "asc": {
+   "iono_applied": true,
+   "gap_filled_frac": 0.009,
+   "deramp": true,
+   "pairs": 5
+  },
+  "desc": {
+   "iono_applied": true,
+   "gap_filled_frac": 0.009,
+   "deramp": true,
+   "pairs": 5
+  }
+ },
+ "generated": "2026-11-14T23:21:26+00:00",
+ "los": {
+  "asc": {
+   "e": 0.6,
+   "n": -0.12,
+   "u": 0.791
+  },
+  "desc": {
+   "e": -0.6,
+   "n": -0.12,
+   "u": 0.791
+  }
+ },
+ "wavelength_cm": {
+  "nisar": 23.84,
+  "s1": 5.55
+ },
+ "layers": [
+  {
+   "key": "desc_impact",
+   "label": "NISAR descending storm change (0-1)",
+   "file": "desc_impact.u8",
+   "static": true,
+   "sensor": "nisar",
+   "kind": "desc_impact",
+   "palette": "impact",
+   "nodata": 255,
+   "max": 250
+  },
+  {
+   "key": "asc_impact",
+   "label": "NISAR ascending storm change (0-1)",
+   "file": "asc_impact.u8",
+   "static": true,
+   "sensor": "nisar",
+   "kind": "asc_impact",
+   "palette": "impact",
+   "nodata": 255,
+   "max": 250
+  },
+  {
+   "key": "impact",
+   "label": "Storm change seen from both directions (0-1)",
+   "file": "impact.u8",
+   "static": true,
+   "sensor": "nisar",
+   "kind": "impact",
+   "palette": "impact",
+   "nodata": 255,
+   "max": 250
+  },
+  {
+   "key": "asc_los",
+   "label": "NISAR ascending line of sight (+ toward satellite)",
+   "file": "asc_los.i16",
+   "dates": [
+    "20260818",
+    "20260830",
+    "20260911",
+    "20260923",
+    "20261005",
+    "20261017"
+   ],
+   "sensor": "nisar",
+   "kind": "asc_los",
+   "p98": 2.63
+  },
+  {
+   "key": "desc_los",
+   "label": "NISAR descending line of sight (+ toward satellite)",
+   "file": "desc_los.i16",
+   "dates": [
+    "20260822",
+    "20260903",
+    "20260915",
+    "20260927",
+    "20261009",
+    "20261021"
+   ],
+   "sensor": "nisar",
+   "kind": "desc_los",
+   "p98": 5.71
+  },
+  {
+   "key": "up",
+   "label": "NISAR vertical (+ up)",
+   "file": "up.i16",
+   "dates": [
+    "20260822",
+    "20260903",
+    "20260915",
+    "20260927",
+    "20261009"
+   ],
+   "sensor": "nisar",
+   "kind": "up",
+   "p98": 4.26
+  },
+  {
+   "key": "east",
+   "label": "NISAR east-west (+ east)",
+   "file": "east.i16",
+   "dates": [
+    "20260822",
+    "20260903",
+    "20260915",
+    "20260927",
+    "20261009"
+   ],
+   "sensor": "nisar",
+   "kind": "east",
+   "p98": 2.18
+  },
+  {
+   "key": "asc_coh",
+   "label": "NISAR asc mean coherence (0-1)",
+   "file": "asc_coh.u8",
+   "static": true,
+   "sensor": "nisar",
+   "kind": "coh"
+  },
+  {
+   "key": "desc_coh",
+   "label": "NISAR desc mean coherence (0-1)",
+   "file": "desc_coh.u8",
+   "static": true,
+   "sensor": "nisar",
+   "kind": "coh"
+  }
+ ],
+ "default_layer": "impact",
+ "signal_series": {
+  "asc": {
+   "file": "asc_cohpairs.u8",
+   "dates": [
+    "20260830",
+    "20260911",
+    "20260923",
+    "20261005",
+    "20261017"
+   ],
+   "starts": [
+    "20260818",
+    "20260830",
+    "20260911",
+    "20260923",
+    "20261005"
+   ],
+   "storm_pair": 4
+  },
+  "desc": {
+   "file": "desc_cohpairs.u8",
+   "dates": [
+    "20260903",
+    "20260915",
+    "20260927",
+    "20261009",
+    "20261021"
+   ],
+   "starts": [
+    "20260822",
+    "20260903",
+    "20260915",
+    "20260927",
+    "20261009"
+   ],
+   "storm_pair": 4
+  }
+ }
+}

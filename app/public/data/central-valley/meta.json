@@ -1,6 +1,10 @@
 {
  "id": "central-valley",
  "name": "Central Valley subsidence near Corcoran, CA",
+ "short": "Central Valley",
+ "emoji": "\ud83c\udf3e",
+ "story": "Farmland that sinks when groundwater is pumped out and rebounds a little when it rains.",
+ "event": null,
  "bbox": [
   -119.75,
   36.0,
@@ -42,7 +46,7 @@
    "pairs": 8
   }
  },
- "generated": "2026-11-14T19:16:06+00:00",
+ "generated": "2026-11-14T23:23:38+00:00",
  "los": {
   "asc": {
    "e": 0.6,
@@ -233,6 +237,56 @@
    "e": 0.62,
    "n": -0.11,
    "u": 0.777
+  }
+ },
+ "signal_series": {
+  "asc": {
+   "file": "asc_cohpairs.u8",
+   "dates": [
+    "20251206",
+    "20251218",
+    "20251230",
+    "20260111",
+    "20260123",
+    "20260204",
+    "20260216",
+    "20260228"
+   ],
+   "starts": [
+    "20251124",
+    "20251206",
+    "20251218",
+    "20251230",
+    "20260111",
+    "20260123",
+    "20260204",
+    "20260216"
+   ],
+   "storm_pair": null
+  },
+  "desc": {
+   "file": "desc_cohpairs.u8",
+   "dates": [
+    "20251205",
+    "20251217",
+    "20251229",
+    "20260110",
+    "20260122",
+    "20260203",
+    "20260215",
+    "20260227"
+   ],
+   "starts": [
+    "20251123",
+    "20251205",
+    "20251217",
+    "20251229",
+    "20260110",
+    "20260122",
+    "20260203",
+    "20260215"
+   ],
+   "storm_pair": null
   }
  }
 }

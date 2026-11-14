@@ -34,17 +34,25 @@ export default function Page() {
   useEffect(() => {
     fetch("data/index.json").then((r) => r.json()).then(async (ids) => {
       const ms = await Promise.all(ids.map((id) => fetch(`data/${id}/meta.json`).then((r) => r.json()).catch(() => ({ id }))));
-      setSites(ms.map((m, k) => ({ id: ids[k], short: m.short, emoji: m.emoji }))); setSiteId(ids[0]);
+      const h = Object.fromEntries(new URLSearchParams(window.location.hash.slice(1)));
+      want.current = h;
+      setSites(ms.map((m, k) => ({ id: ids[k], short: m.short, emoji: m.emoji }))); setSiteId(ids.includes(h.site) ? h.site : ids[0]);
+      if (h.mode === "speed") setMode("speed");
     });
   }, []);
   const [sig, setSig] = useState(null);         // per-pass signal quality arrays {asc, desc}
+  const [tour, setTour] = useState(null);       // {i, auto} while the guided tour runs
+  const [copied, setCopied] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const want = useRef(null);                    // state requested by the page link (#site=...&layer=...), applied as data loads
   const firstFit = useRef(true);
 
   useEffect(() => {
     if (!siteId) return;
     setMeta(null); setCtx(null); setGrid(null); setOther(null); setPick(null); cache.current = {};
     fetch(`data/${siteId}/meta.json`).then((r) => r.json()).then((m) => {
-      setMeta(m); setSig(null); setLayerKey((m.layers.find((l) => l.key === m.default_layer) || m.layers.find((l) => l.key === "up") || m.layers[0]).key);
+      const linked = want.current?.site === m.id && m.layers.find((l) => l.key === want.current.layer);
+      setMeta(m); setSig(null); setLayerKey((linked || m.layers.find((l) => l.key === m.default_layer) || m.layers.find((l) => l.key === "up") || m.layers[0]).key);
       if (m.signal_series) Promise.all(Object.entries(m.signal_series).map(([k, v]) => fetch(`data/${m.id}/${v.file}`).then((r) => r.arrayBuffer()).then((b) => [k, new Uint8Array(b)])))
         .then((e) => setSig({ id: m.id, ...Object.fromEntries(e) }));
     });
@@ -62,7 +70,16 @@ export default function Page() {
   useEffect(() => {
     if (!meta || !layer) return;
     let live = true; setGrid(null); setOther(null);
-    load(meta, layer).then((g) => { if (live) { setGrid(g); setT(layer.static ? 0 : layer.dates.length - 1); } });
+    load(meta, layer).then((g) => {
+      if (!live) return;
+      const w = want.current; let t0 = layer.static ? 0 : layer.dates.length - 1;
+      if (w && w.site === meta.id && w.layer === layer.key) {            // finish applying the page link, once
+        if (!layer.static && w.t && layer.dates.includes(w.t)) t0 = layer.dates.indexOf(w.t);
+        if (w.lat && w.lon) { const p = toPixel(+w.lon, +w.lat); if (p) setPick(p); }
+      }
+      want.current = null;
+      setGrid(g); setT(t0);
+    });
     if (otherLayer) load(meta, otherLayer).then((g) => live && setOther(g));
     return () => { live = false; };
   }, [meta, layerKey]);
@@ -245,6 +262,78 @@ export default function Page() {
   const windNow = wind && nowX !== null && wind.pts.find((p) => p.x === nowX);
   const compass = (deg) => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8];
   const wl = meta?.wavelength_cm;
+  // The spot that changed most inside the focus box, for the headline finding and the tour.
+  const hot = useMemo(() => {
+    if (!meta || !grid || !layer || grid._key !== layer.key || !meta.focus_box) return null;
+    if (layer.static && layer.palette !== "impact") return null;
+    const [w, s, e, n] = meta.bbox, [fw, fs, fe, fn] = meta.focus_box, N = meta.nx * meta.ny;
+    const i0 = Math.max(0, Math.floor(((fw - w) / (e - w)) * meta.nx)), i1 = Math.min(meta.nx - 1, Math.floor(((fe - w) / (e - w)) * meta.nx));
+    const j0 = Math.max(0, Math.floor(((n - fn) / (n - s)) * meta.ny)), j1 = Math.min(meta.ny - 1, Math.floor(((n - fs) / (n - s)) * meta.ny));
+    const off = layer.static ? 0 : (layer.dates.length - 1) * N;
+    let best = null, valid = 0, over = 0;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const q = grid[off + j * meta.nx + i];
+      if (q === (layer.static ? layer.nodata : meta.nodata)) continue;
+      const v = layer.static ? q / layer.max : q * meta.scale; valid++;
+      if (layer.static && v > 0.3) over++;
+      if (!best || Math.abs(v) > Math.abs(best.v)) best = { i, j, v };
+    }
+    if (!best) return null;
+    return { ...best, lon: w + ((best.i + 0.5) / meta.nx) * (e - w), lat: n - ((best.j + 0.5) / meta.ny) * (n - s), share: valid ? over / valid : 0 };
+  }, [meta, grid, layerKey]);
+
+  // Keep the page link in step with what is on screen, so any view can be shared.
+  useEffect(() => {
+    if (!meta || !layer || want.current) return;
+    const q = new URLSearchParams({ site: meta.id, layer: layer.key });
+    if (!layer.static) q.set("t", layer.dates[t]);
+    if (mode === "speed") q.set("mode", "speed");
+    if (pick) { q.set("lat", pick.lat.toFixed(4)); q.set("lon", pick.lon.toFixed(4)); }
+    window.history.replaceState(null, "", "#" + q.toString());
+  }, [meta, layerKey, t, mode, pick]);
+  const copyLink = async () => { try { await navigator.clipboard.writeText(window.location.href); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setCopied(false); } };
+
+  // Guided tour: each step names the view it wants; an effect moves the app there as data arrives.
+  const steps = useMemo(() => {
+    if (!meta) return [];
+    const hasS1 = meta.layers.some((l) => l.sensor === "s1" && l.kind === "up"), st = ctx?.gnss?.stations?.[0];
+    const main = meta.default_layer && meta.layers.find((l) => l.key === meta.default_layer) ? meta.default_layer : "up";
+    if (meta.event) return [
+      { say: `${meta.story} Pink marks where the ground surface looked different to the radar after the storm than before it.`, layer: main },
+      { say: "This is the spot in the yellow box that changed the most. The chart shows the radar signal holding steady through the calm weeks, then dropping across the storm.", layer: main, pick: "hot" },
+      { say: "The rain and wind charts below mark the day the storm arrived, so you can line the weather up with the change.", layer: main, pick: "hot", scroll: "weather" },
+      { say: "What this cannot tell you: pink means the surface changed, not that something was destroyed. Tides, crops and wet soil also change the signal, and open water gives no reading.", layer: main, notes: true },
+    ];
+    return [
+      { say: `${meta.story} Red is moving down, blue is moving up. Watch it build up pass by pass.`, layer: "up", mode: "total", play: true },
+      { say: "This is the spot in the yellow box that moved the most. Every point on the chart is one pass of the satellite, 12 days apart.", layer: "up", mode: "total", pick: "hot" },
+      { say: "Speed shows when it moved fastest. Compare the timing with the rainfall chart below.", layer: "up", mode: "speed", pick: "hot" },
+      ...(hasS1 ? [{ say: "An older radar, Sentinel-1, looked at the same place with a much shorter wavelength. Blank patches are where it lost track of the ground.", layer: "s1_up", mode: "total" }] : []),
+      ...(st ? [{ say: `A check against the ground: GPS station ${st.id} measured the same motion from a fixed antenna. The two should agree closely.`, layer: "up", mode: "total", station: st }] : []),
+      { say: "What this cannot see: motion along the north-south direction is mostly invisible to the radar, and these are early products NASA has not finished validating.", layer: "up", mode: "total", notes: true },
+    ];
+  }, [meta, ctx]);
+  const step = tour && steps[tour.i];
+  useEffect(() => {
+    if (!step || !meta || !layer) return;
+    if (layer.key !== step.layer && meta.layers.find((l) => l.key === step.layer)) { setPlaying(false); setLayerKey(step.layer); return; }
+    if (step.mode && mode !== step.mode) { setMode(step.mode); return; }
+    if (!grid || grid._key !== layer.key) return;
+    setPlaying(!!step.play);
+    if (!layer.static) setT(step.play ? 0 : layer.dates.length - 1);
+    setNotesOpen(!!step.notes);
+    if (step.pick === "hot" && hot) setPick({ i: hot.i, j: hot.j, lon: hot.lon, lat: hot.lat });
+    else if (step.station) { const p = toPixel(step.station.lon, step.station.lat); if (p) setPick({ ...p, station: step.station.id }); }
+    else if (!step.pick) setPick(null);
+    if (step.scroll) setTimeout(() => document.getElementById(step.scroll)?.scrollIntoView({ behavior: "smooth", block: "center" }), 300);
+  }, [tour?.i, step, layerKey, grid, mode, hot === null]);
+  useEffect(() => {
+    if (!tour?.auto) return;
+    const id = setTimeout(() => setTour((v) => (v && v.i < steps.length - 1 ? { ...v, i: v.i + 1 } : null)), 8000);
+    return () => clearTimeout(id);
+  }, [tour, steps.length]);
+  useEffect(() => { setTour(null); }, [siteId]);
+
   const cov = ctx?.coverage;
   const SENSORS = [["nisar", "NISAR", "L-band"], ["s1", "Sentinel-1", "C-band"]];
   const KINDS = [["impact", "Storm change", "🌀"], ["up", "Vertical", "↕️"], ["east", "East-west", "↔️"], ["asc_los", "Ascending view", "↗️"], ["desc_los", "Descending view", "↘️"], ["coh", "Signal quality", "📶"]];
@@ -289,37 +378,65 @@ export default function Page() {
           </div>
         )}
       </div>
-      <aside className="panel">
+      <aside className={"panel" + (step ? " touring" : "")}>
         <header>
           <h1><span className="logo" aria-hidden="true">🛰️</span> <span className="brand">SARvis</span></h1>
           <p className="sub">Watching the ground move from space, every 12 days.</p>
+          {meta && layer && (
+            <div className="actions hide-on-tour">
+              <button className="cta" onClick={() => setTour({ i: 0, auto: false })}><span aria-hidden="true">🎬</span> Take the tour</button>
+              <button className="ghost" onClick={copyLink}><span aria-hidden="true">🔗</span> {copied ? "Link copied" : "Copy link to this view"}</button>
+            </div>
+          )}
         </header>
+        {step && (
+          <div className="tour" role="region" aria-label="Guided tour" key={tour.i}>
+            <div className="tourtop"><b>Step {tour.i + 1} of {steps.length}</b>
+              <label className="auto"><input type="checkbox" checked={tour.auto} onChange={(e) => setTour({ ...tour, auto: e.target.checked })} /> Auto-advance</label></div>
+            <p>{step.say}</p>
+            {tour.auto && <div className="tourbar"><i /></div>}
+            <div className="tourbtns">
+              <button className="ghost" disabled={tour.i === 0} onClick={() => setTour({ ...tour, i: tour.i - 1 })}>Back</button>
+              {tour.i < steps.length - 1 ? <button className="cta" onClick={() => setTour({ ...tour, i: tour.i + 1 })}>Next</button> : <button className="cta" onClick={() => setTour(null)}>Finish</button>}
+              <button className="ghost" onClick={() => setTour(null)}>Exit</button>
+            </div>
+          </div>
+        )}
         {meta?.synthetic && <div className="banner"><b>Demo data.</b> Radar motion is synthetic. Rainfall and GPS are real.</div>}
-        <div className="seg" role="tablist" aria-label="Site">
+        <div className="seg hide-on-tour" role="tablist" aria-label="Site">
           {sites.map((st) => <button key={st.id} role="tab" aria-selected={st.id === siteId} className={"tab" + (st.id === siteId ? " on" : "")} onClick={() => setSiteId(st.id)}><span className="em" aria-hidden="true">{st.emoji}</span>{st.short || st.id}</button>)}
         </div>
         {meta && (
-          <div className="story" key={meta.id}>
+          <div className="story hide-on-tour" key={meta.id}>
             <div className="em" aria-hidden="true">{meta.emoji}</div>
             <div><b>{meta.name}</b><p>{meta.story}</p>{meta.event && <p className="muted">{meta.event.name}, {meta.event.when}. {meta.event.note}</p>}</div>
           </div>
         )}
         {meta && layer && (<>
-          <div>
+          <div className="hide-on-tour">
             <label>Sensor</label>
             <div className="seg">
               {SENS.map(([k, name, band]) => (
                 <button key={k} className={sensor === k ? "on" : ""} aria-pressed={sensor === k} onClick={() => choose(k, layer.kind)}><i style={{ background: C[k] }} />{name} <small>{band}</small></button>))}
             </div>
           </div>
-          <div>
+          <div className="hide-on-tour">
             <label>Measurement</label>
             <div className="chips">
               {KINDS.filter(([k]) => has(sensor, k)).map(([k, name, icon]) => <button key={k} className={layer.kind === k ? "on" : ""} aria-pressed={layer.kind === k} onClick={() => choose(sensor, k)}><span aria-hidden="true">{icon}</span> {name}</button>)}
             </div>
           </div>
+          {hot && (
+            <button className="finding hide-on-tour" onClick={() => setPick({ i: hot.i, j: hot.j, lon: hot.lon, lat: hot.lat })}>
+              <span className="em" aria-hidden="true">{isImpact ? "🔎" : "⚡"}</span>
+              <span>{isImpact
+                ? <><b>{Math.round(100 * hot.share)}%</b> of the focus area lost more than 30% of its usual radar signal across the storm. Strongest spot: <b>{Math.round(100 * hot.v)}%</b>.</>
+                : <>Biggest change in the focus area: <b>{`${hot.v > 0 ? "+" : "−"}${Math.abs(hot.v).toFixed(1)} cm`}</b>{ends ? ` ${hot.v >= 0 ? ends[1] : ends[0]}` : ""} since {fmtDate(layer.dates[0])}.</>}
+                <small> Tap to see that spot.</small></span>
+            </button>
+          )}
           {!layer.static && (
-            <div className="seg" aria-label="Show">
+            <div className="seg hide-on-tour" aria-label="Show">
               <button className={!speed ? "on" : ""} aria-pressed={!speed} onClick={() => setMode("total")}><span aria-hidden="true">📏</span> Total change</button>
               <button className={speed ? "on" : ""} aria-pressed={speed} onClick={() => setMode("speed")}><span aria-hidden="true">⏱️</span> Speed</button>
             </div>
@@ -334,7 +451,7 @@ export default function Page() {
             {chart?.stat && <p className="muted" style={{ margin: "8px 0 0" }}>Radar minus GPS, root-mean-square: <b style={{ color: "var(--ink)" }}>{chart.stat.rms.toFixed(2)} cm</b> over {chart.stat.n} dates{ctx.gnss.ref ? ` (GPS relative to station ${ctx.gnss.ref})` : " (GPS not referenced; compare vertical only)"}.</p>}
           </div>
           {rain && rain.pts.length > 0 && (
-            <div className="card">
+            <div className="card" id="weather">
               <h2><span aria-hidden="true">🌧️</span> Daily rainfall, mm</h2>
               <p className="muted" style={{ margin: "0 0 8px" }}>Regional estimate at the site centre.</p>
               <Bars pts={rain.pts} x0={rain.x0} x1={rain.x1} markX={layer.static ? null : toDay(layer.dates[t])} eventX={eventX} />
@@ -384,7 +501,7 @@ export default function Page() {
               </div>
             </div>
           )}
-          <details className="card">
+          <details className="card" open={notesOpen} onToggle={(e) => setNotesOpen(e.currentTarget.open)}>
             <summary><span aria-hidden="true">📖</span>&nbsp;How to read this</summary>
             <ul className="notes">
               <li>Each pixel is about 80 m. Motion is relative to the white dashed reference area, which is assumed stable. The yellow dashed box is the focus area used for the coverage numbers.</li>

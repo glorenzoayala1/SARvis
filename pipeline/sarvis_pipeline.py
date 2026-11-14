@@ -265,8 +265,12 @@ def plane(d, where):
 stacks = {}
 for tr in cfg["tracks"]:
     plist = pairs[tr["id"]]
+    data = []
     with ThreadPoolExecutor(WORKERS) as ex:
-        data = list(ex.map(read_pair, [u for _, _, u in plist]))
+        for p in ex.map(read_pair, [u for _, _, u in plist]):      # results arrive in order; print as they land
+            data.append(p)
+            print(f"\r{tr['id']}: {len(data)} of {len(plist)} files read", end="", flush=True)
+    print()
     lam_cm = 29979245800.0 / data[0]["freq"]
     k_cm = PHASE_SIGN * lam_cm / (4 * np.pi)
     raw, ion, coh, bad = [], [], [], []
@@ -480,8 +484,12 @@ if RUN_S1:
         if not cand: continue
         fr = max(cand)[1]
         items = sorted(frames[fr]["files"].items(), key=lambda kv: kv[0][1])
+        data = []
         with ThreadPoolExecutor(WORKERS) as ex:
-            data = list(ex.map(read_disp, [v[1] for _, v in items]))
+            for p in ex.map(read_disp, [v[1] for _, v in items]):
+                data.append(p)
+                print(f"\rSentinel-1 {pas}: {len(data)} of {len(items)} files read", end="", flush=True)
+        print()
         raw = np.array([to_grid(p, p["d"]) for p in data])
         raw = raw - np.nanmedian(raw[:, REF], axis=1)[:, None, None]
         refs = [k[0] for k, _ in items]

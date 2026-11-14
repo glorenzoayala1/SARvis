@@ -31,7 +31,8 @@ for track, d, frame in tracks:
     for k in range(8):
         t0 = start + dt.timedelta(days=12 * k); t1 = t0 + dt.timedelta(days=12)
         los = 12 * (UP_RATE * u + EAST_RATE * e) * blob                    # cm toward satellite
-        phase = los * 4 * np.pi / LAM / PHASE_SIGN + rng.normal(0, 0.05, blob.shape) + rng.normal(0, 3)
+        iono = (X - cx) / 5000.0 * rng.normal(0, 1) + (Y - cy) / 5000.0 * rng.normal(0, 1)   # radians, tilted plane
+        phase = los * 4 * np.pi / LAM / PHASE_SIGN + rng.normal(0, 0.05, blob.shape) + rng.normal(0, 3) + iono
         coh = 0.8 - 0.6 * (blob > 0.97)                                    # decorrelated core
         s = lambda t, hh: t.strftime("%Y%m%d") + hh
         name = (f"NISAR_L2_PR_GUNW_{6+k:03d}_{track:03d}_{d}_{frame:03d}_{7+k:03d}_4000_SH_"
@@ -42,6 +43,9 @@ for track, d, frame in tracks:
             g.create_dataset("unwrappedPhase", data=phase.astype("f4"), chunks=(128, 128), compression="gzip")
             g.create_dataset("coherenceMagnitude", data=coh.astype("f4"), chunks=(128, 128), compression="gzip")
             g.create_dataset("connectedComponents", data=np.ones(blob.shape, "u2"), chunks=(128, 128))
+            g.create_dataset("ionospherePhaseScreen", data=iono.astype("f4"), chunks=(128, 128), compression="gzip")
+            mask = np.full(blob.shape, 131072 + 11, "u4"); mask[:5] = 111        # high bit set like real files; a strip of "water"
+            f.create_dataset("/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/mask", data=mask, chunks=(128, 128))
             f["/science/LSAR/GUNW/grids/frequencyA/listOfPolarizations"] = np.array([b"HH"])
             f["/science/LSAR/GUNW/grids/frequencyA/centerFrequency"] = FREQ
             f["/science/LSAR/identification/orbitPassDirection"] = b"Ascending" if d == "A" else b"Descending"

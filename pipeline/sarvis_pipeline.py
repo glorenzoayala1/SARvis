@@ -63,6 +63,7 @@ SITES = {
         "ref_box": (-118.385, 33.770, -118.365, 33.785),     # contains continuous GPS station PVHS
         "focus_box": (-118.385, 33.733, -118.350, 33.752),   # CHECK: rough box around the active slide
         "gnss_ref": "PVHS",                                  # GPS station inside ref_box; other stations are differenced against it
+        "deramp": True,                                      # remove a tilted plane per pair, fitted outside focus_box
         "tracks": [  # (track, direction, frame) all confirmed present in CMR on 2026-11-14
             {"id": "asc", "track": 34, "dir": "A", "frame": 18},
             {"id": "desc", "track": 13, "dir": "D", "frame": 72},
@@ -75,6 +76,7 @@ SITES = {
         "ref_box": (-119.440, 36.210, -119.410, 36.240),
         "focus_box": (-119.700, 36.050, -119.500, 36.200),
         "gnss_ref": None,                                    # no active GPS station in the ref box (checked 2026-11-14)
+        "deramp": False,                                     # the sinking area is wider than this scene, so a plane fit would remove real signal
         "tracks": [
             {"id": "asc", "track": 34, "dir": "A", "frame": 20},
             {"id": "desc", "track": 114, "dir": "D", "frame": 70},
@@ -82,12 +84,14 @@ SITES = {
         "site_height_m": 60.0,
     },
 }
-FIRST_RUN = True         # True = quick gate run: Central Valley, 3 pairs, no Sentinel-1. Set False for the full run.
+FIRST_RUN = False        # True = quick gate run: Central Valley, 3 pairs, no Sentinel-1. False = full run of SITE below.
 SITE = os.environ.get("SARVIS_SITE", "central-valley" if FIRST_RUN else "portuguese-bend")
 SHORT_NAME = "NISAR_L2_GUNW_PROVISIONAL_V1"
 COH_MIN = 0.3            # pixels below this coherence are dropped for that pair
-USE_MASK = False         # see cell 4 before turning on
-APPLY_IONO = False       # subtract the product's ionosphere phase screen (not applied by NASA by default)
+USE_MASK = True          # drop water and invalid-subswath pixels (low byte of the mask layer, see cell 4)
+APPLY_IONO = "auto"      # True / False / "auto". NASA ships an ionosphere phase screen but does not apply it.
+                         # "auto" applies it only if it makes the pairs flatter (smaller scene-wide tilt).
+MAX_GAP_FRAC = 0.25      # a pixel may miss up to this share of pairs; gaps are filled at that pixel's own average rate
 PHASE_SIGN = -1.0        # CHECK in cell 6. displacement_toward_satellite = PHASE_SIGN * phase * wavelength / (4 pi)
 MAX_PAIRS = 3 if (FIRST_RUN and not SYNTH) else None
 RUN_RAIN, RUN_GNSS, RUN_S1 = True, True, not (FIRST_RUN and not SYNTH)   # part 2 steps; turn one off if it blocks you
@@ -183,7 +187,11 @@ def read_pair(url):
         if fill is not None:
             out["unw"][out["unw"] == np.asarray(fill).item()] = np.nan
         if APPLY_IONO and "ionospherePhaseScreen" in g:
-            out["unw"] = out["unw"] - g["ionospherePhaseScreen"][sy, sx].astype("f4")
+            ion = g["ionospherePhaseScreen"][sy, sx].astype("f4")
+            ifill = g["ionospherePhaseScreen"].attrs.get("_FillValue")
+            if ifill is not None:
+                ion[ion == np.asarray(ifill).item()] = np.nan
+            out["ion"] = ion
         if f"{UNW}/mask" in f and f[f"{UNW}/mask"].shape == g["unwrappedPhase"].shape:
             out["mask"] = f[f"{UNW}/mask"][sy, sx]
         # line-of-sight unit vector: a coarse cube (height, y, x). Take the height layer nearest the site.
@@ -201,10 +209,11 @@ first = read_pair(pairs[cfg["tracks"][0]["id"]][0][2])
 print("crop", first["unw"].shape, "EPSG", first["epsg"], first["pol"], first["orbit"], first["look"],
       "in %.1f s" % first["seconds"])
 if "mask" in first:
-    # CHECK: the product spec defines these digits. One 2026 Space Apps project reads them as
-    # 255 = fill, hundreds digit = water, tens/ones = reference/secondary subswath (0 = invalid).
-    # Confirm against the GUNW Product Specification before setting USE_MASK = True.
-    print("mask values in crop:", np.unique(first["mask"])[:20])
+    # opera-utils (nisar/_mask.py) decodes the mask as three decimal digits: hundreds = water,
+    # tens / ones = reference / secondary subswath (0 = invalid), 255 = fill. Real provisional files
+    # also carry higher bits (values like 131083 = 131072 + 11) whose meaning I could not confirm,
+    # so only the low byte is used.
+    print("mask values in crop:", np.unique(first["mask"])[:20], "-> low byte:", np.unique(first["mask"] & 0xFF)[:20])
 
 # %%
 # 5. Read every pair, put it on one lon/lat grid, convert to cm, reference, and chain.
@@ -215,6 +224,9 @@ LON, LAT = np.meshgrid(lons, lats)
 ny, nx = LON.shape
 rw, rs, re_, rn = cfg["ref_box"]
 REF = (LON >= rw) & (LON <= re_) & (LAT >= rs) & (LAT <= rn)
+
+def day(s): return dt.date(int(s[:4]), int(s[4:6]), int(s[6:])).toordinal()
+def ymd(o): return dt.date.fromordinal(int(o)).strftime("%Y%m%d")
 
 def to_grid(p, arr, nodata=np.nan):
     """Nearest-neighbour sample of a cropped UTM array onto the common lon/lat grid."""
@@ -238,38 +250,75 @@ def los_enu(p):
         e, n = -e, -n
     return e, n, u
 
+fx0, fs0, fx1, fn0 = cfg["focus_box"]
+FOCUS = (LON >= fx0) & (LON <= fx1) & (LAT >= fs0) & (LAT <= fn0)
+XKM = (LON - LON.mean()) * 111.32 * np.cos(np.radians(lat0)); YKM = (LAT - LAT.mean()) * 110.54
+
+def plane(d, where):
+    """Least-squares plane through d on the pixels in `where`. Returns the plane and its tilt in cm per 10 km."""
+    ok = np.isfinite(d) & where
+    if ok.sum() < 50: return np.zeros_like(d), np.nan
+    A = np.c_[XKM[ok], YKM[ok], np.ones(ok.sum())]
+    c = np.linalg.lstsq(A, d[ok], rcond=None)[0]
+    return c[0] * XKM + c[1] * YKM + c[2], 10 * float(np.hypot(c[0], c[1]))
+
 stacks = {}
 for tr in cfg["tracks"]:
     plist = pairs[tr["id"]]
     with ThreadPoolExecutor(WORKERS) as ex:
         data = list(ex.map(read_pair, [u for _, _, u in plist]))
     lam_cm = 29979245800.0 / data[0]["freq"]
-    disp, coh = [], []
+    k_cm = PHASE_SIGN * lam_cm / (4 * np.pi)
+    raw, ion, coh, bad = [], [], [], []
     for p in data:
-        d = PHASE_SIGN * to_grid(p, p["unw"]) * lam_cm / (4 * np.pi)
         c = to_grid(p, p["coh"])
-        bad = ~np.isfinite(d) | (c < COH_MIN) | (to_grid(p, p["cc"].astype("f4"), 0) == 0)
+        b = (c < COH_MIN) | (to_grid(p, p["cc"].astype("f4"), 0) == 0)
         if USE_MASK and "mask" in p:
-            m = to_grid(p, p["mask"].astype("f4"), 255).astype(int)
-            bad |= (m == 255) | (m >= 100) | ((m // 10) % 10 == 0) | (m % 10 == 0)
-        d[bad] = np.nan
+            m = to_grid(p, (p["mask"] & 0xFF).astype("f4"), 255).astype(int)
+            b |= (m == 255) | (m >= 100) | ((m // 10) % 10 == 0) | (m % 10 == 0)
+        raw.append(k_cm * to_grid(p, p["unw"])); coh.append(c); bad.append(b)
+        ion.append(k_cm * to_grid(p, p["ion"]) if "ion" in p else None)
+    # Ionosphere: compare the scene-wide tilt of each pair with and without NASA's phase screen.
+    tilt = lambda arrs: float(np.nanmedian([plane(np.where(b, np.nan, a), ~FOCUS)[1] for a, b in zip(arrs, bad)]))
+    have_ion = all(i is not None and np.isfinite(i).any() for i in ion)
+    t_raw = tilt(raw); t_ion = tilt([r - i for r, i in zip(raw, ion)]) if have_ion else np.nan
+    use_ion = have_ion and (APPLY_IONO is True or (APPLY_IONO == "auto" and t_ion < t_raw))
+    disp = []
+    for r, i, b in zip(raw, ion, bad):
+        d = (r - i) if use_ion else r.copy()
+        d[b | ~np.isfinite(d)] = np.nan
+        if cfg.get("deramp"):
+            d = d - plane(d, ~FOCUS)[0]
         ref = np.nanmedian(d[REF]) if np.isfinite(d[REF]).any() else np.nan
-        disp.append(d - ref); coh.append(c)
+        disp.append(d - ref)
     disp = np.array(disp); coh = np.array(coh)
     dates = [plist[0][0]] + [b for _, b, _ in plist]
-    cum = np.concatenate([np.zeros((1, ny, nx), "f4"), np.cumsum(disp, axis=0)])   # NaN in any pair drops the pixel after it
+    # Chain the pairs. A pixel missing in a few pairs is filled at its own average rate; too many gaps drops it.
+    days = np.array([day(b) - day(a) for a, b, _ in plist], "f4")[:, None, None]
+    okp = np.isfinite(disp)
+    rate = np.nansum(np.where(okp, disp, 0), axis=0) / np.maximum((okp * days).sum(axis=0), 1)
+    keep = okp.mean(axis=0) >= 1 - MAX_GAP_FRAC
+    filled = np.where(okp, disp, rate[None] * days)
+    cum = np.concatenate([np.zeros((1, ny, nx), "f4"), np.cumsum(filled, axis=0)]).astype("f4")
+    cum[:, ~keep] = np.nan
     stacks[tr["id"]] = {"dates": dates, "pairs": disp, "cum": cum, "coh": coh,
-                        "enu": los_enu(data[0]), "lam_cm": lam_cm,
-                        "valid_frac": float(np.isfinite(cum[-1]).mean())}
-    print(tr["id"], "wavelength %.2f cm" % lam_cm, "LOS (e,n,u) = %.2f %.2f %.2f" % stacks[tr["id"]]["enu"],
-          "| pixels surviving all pairs: %.0f%%" % (100 * stacks[tr["id"]]["valid_frac"]),
+                        "enu": los_enu(data[0]), "lam_cm": lam_cm, "iono_applied": bool(use_ion),
+                        "gap_filled_frac": float((~okp)[:, keep].mean()) if keep.any() else 0.0,
+                        "valid_frac": float(keep.mean())}
+    print(tr["id"], "wavelength %.2f cm" % lam_cm, "LOS (e,n,u) = %.2f %.2f %.2f" % stacks[tr["id"]]["enu"])
+    print("   scene tilt, cm per 10 km: raw %.2f, with ionosphere screen %.2f -> ionosphere correction %s"
+          % (t_raw, t_ion, "APPLIED" if use_ion else "not applied"), "| plane removed" if cfg.get("deramp") else "")
+    print("   pixels kept: %.0f%% (%.0f%% with every pair; %.1f%% of kept values gap-filled)"
+          % (100 * keep.mean(), 100 * okp.all(axis=0).mean(), 100 * stacks[tr["id"]]["gap_filled_frac"]),
           "| ref-box pixels usable in last pair: %d" % np.isfinite(disp[-1][REF]).sum())
 
 # %%
-# 6. Look at it.  CHECK the sign here.
-# Positive = toward the satellite. Subsiding ground moves AWAY in both tracks, so on the
-# Central Valley site the bowl must be negative in both panels. If it is positive, set
-# PHASE_SIGN = +1.0 in cell 2 and rerun from cell 5. Only then trust the landslide numbers.
+# 6. Look at it.  CHECK the sign here, on PORTUGUESE BEND, ascending panel.
+# Positive = toward the satellite. The slide moves seaward (south to south-west) and down. The ascending
+# view has east, north and up components that are all positive, so that motion must come out NEGATIVE
+# there. If the slide is positive in the ascending panel, set PHASE_SIGN = +1.0 and rerun from cell 5.
+# (PHASE_SIGN = -1 matches how MintPy converts NISAR phase.) Central Valley is not a good sign test in
+# winter: the first real run showed scene-wide tilts of several cm, and GPS station HANF rising.
 import matplotlib
 if SYNTH: matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -285,9 +334,6 @@ fig.savefig(OUT / "check_los.png", dpi=110, bbox_inches="tight")
 # %%
 # 7. Two tracks -> vertical and east. North is dropped: both tracks see only ~0.1-0.16 of it,
 #    so any real north-south motion leaks into these two numbers. State this in the app.
-def day(s): return dt.date(int(s[:4]), int(s[4:6]), int(s[6:])).toordinal()
-def ymd(o): return dt.date.fromordinal(int(o)).strftime("%Y%m%d")
-
 def decompose(a, d):
     """a, d = dicts with dates, cum (t, y, x), enu. Returns dates, up, east on d's dates."""
     ta = np.array([day(x) for x in a["dates"]]); td = np.array([day(x) for x in d["dates"]])
@@ -385,9 +431,6 @@ if SURVEY_CSV:   # e.g. the City of Rancho Palos Verdes monument surveys, once y
 #     "rebasing" adds the last value of the previous block so the series is continuous.
 #     CHECK S1_SIGN the same way as PHASE_SIGN (Central Valley must sink).
 S1NAME = re.compile(r"OPERA_L3_DISP-S1_IW_F(\d{5})_VV_(\d{8})T(\d{2})\d{4}Z_(\d{8})T\d{6}Z_v[\d.]+_(\d{8}T\d{6})Z")
-fx0, fs0, fx1, fn0 = cfg["focus_box"]
-FOCUS = (LON >= fx0) & (LON <= fx1) & (LAT >= fs0) & (LAT <= fn0)
-
 def read_disp(url):
     from pyproj import CRS
     with open_file(url) as f:
@@ -460,7 +503,7 @@ if RUN_S1:
     # Coverage: share of focus-box pixels that keep a measurement on every date.
     cov = lambda cum: round(float(np.isfinite(cum).all(axis=0)[FOCUS].mean()), 3)
     context["coverage"] = {"focus_box": list(cfg["focus_box"]),
-                           "nisar": {k: cov(v["cum"]) for k, v in stacks.items()},
+                           "nisar": {k: cov(v["pairs"]) for k, v in stacks.items()},
                            "s1": {k: cov(v["cum"]) for k, v in s1.items()}}
     print("share of focus-box pixels measured on every date:", context["coverage"])
 
@@ -470,6 +513,8 @@ meta = {"id": SITE, "name": cfg["name"], "bbox": [W, S, E, N], "nx": nx, "ny": n
         "units": "cm", "scale": 0.01, "nodata": -32768, "ref_box": list(cfg["ref_box"]),
         "focus_box": list(cfg["focus_box"]),
         "synthetic": SYNTH, "source": SHORT_NAME, "coh_min": COH_MIN, "phase_sign": PHASE_SIGN,
+        "processing": {k: {"iono_applied": v["iono_applied"], "gap_filled_frac": round(v["gap_filled_frac"], 3),
+                           "deramp": bool(cfg.get("deramp")), "pairs": len(v["pairs"])} for k, v in stacks.items()},
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "los": {k: dict(zip("enu", [round(float(v), 3) for v in s["enu"]])) for k, s in stacks.items()},
         "layers": []}

@@ -280,8 +280,9 @@ export default function Page() {
             <summary>How to read this</summary>
             <ul className="notes">
               <li>Each pixel is about 80 m. Motion is relative to the white dashed reference area, which is assumed stable. The yellow dashed box is the focus area used for the coverage numbers.</li>
-              <li>The radar sees motion toward or away from the satellite. North-south motion is nearly invisible (about 12% of it shows up), so vertical and east-west values absorb some of it.</li>
-              <li>A pixel that loses signal on any date is blank from then on.</li>
+              <li>The radar sees motion toward or away from the satellite. Only about {Math.round(100 * Math.abs(meta.los?.asc?.n ?? 0.2))}% of north-south motion shows up, so vertical and east-west values absorb some of it.</li>
+              <li>A pixel may miss up to a quarter of its dates; those gaps are filled at its own average rate. Pixels with more gaps are blank.</li>
+              {meta.processing?.asc && <li>Processing: ionosphere correction {meta.processing.asc.iono_applied ? "applied" : "not applied"}{meta.processing.asc.deramp ? ", scene-wide tilt removed per pair" : ""}, {meta.processing.asc.pairs} ascending and {meta.processing.desc?.pairs ?? 0} descending pairs.</li>}
               <li>Sentinel-1 values are OPERA DISP-S1 at 30 m, sampled onto the NISAR grid. The two sensors use different dates.</li>
               <li>Source: {meta.source}, provisional products, not yet fully validated by NASA.</li>
             </ul>

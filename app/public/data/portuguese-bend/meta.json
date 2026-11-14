@@ -28,7 +28,21 @@
  "source": "NISAR_L2_GUNW_PROVISIONAL_V1",
  "coh_min": 0.3,
  "phase_sign": -1.0,
- "generated": "2026-11-14T17:52:33+00:00",
+ "processing": {
+  "asc": {
+   "iono_applied": true,
+   "gap_filled_frac": 0.0,
+   "deramp": true,
+   "pairs": 8
+  },
+  "desc": {
+   "iono_applied": true,
+   "gap_filled_frac": 0.0,
+   "deramp": true,
+   "pairs": 8
+  }
+ },
+ "generated": "2026-11-14T18:53:56+00:00",
  "los": {
   "asc": {
    "e": 0.6,
@@ -59,7 +73,7 @@
    ],
    "sensor": "nisar",
    "kind": "asc_los",
-   "p98": 4.38
+   "p98": 4.51
   },
   {
    "key": "desc_los",
@@ -78,7 +92,7 @@
    ],
    "sensor": "nisar",
    "kind": "desc_los",
-   "p98": 9.89
+   "p98": 10.14
   },
   {
    "key": "up",
@@ -96,7 +110,7 @@
    ],
    "sensor": "nisar",
    "kind": "up",
-   "p98": 7.95
+   "p98": 8.15
   },
   {
    "key": "east",
@@ -114,7 +128,7 @@
    ],
    "sensor": "nisar",
    "kind": "east",
-   "p98": 4.07
+   "p98": 4.15
   },
   {
    "key": "s1_asc_los",

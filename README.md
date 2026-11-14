@@ -12,10 +12,10 @@ for Portuguese Bend (landslide) and the Central Valley near Corcoran (subsidence
 - `app/`: Next.js + MapLibre viewer. Reads `app/public/data/<site>/`.
 
 ## Run the pipeline (Colab)
-1. Open the notebook in Colab and run all. `FIRST_RUN = True` (cell 2) does the quick gate run: Central Valley, 3 pairs, no Sentinel-1.
+1. Open the notebook in Colab and run all. It runs the full Portuguese Bend site by default. Set `FIRST_RUN = True` (cell 2) for a quick 3-pair test.
 2. Cell 3 asks for your Earthdata login.
 3. Cell 4 is the timing gate: one cropped pair should come back in well under 2 minutes.
-4. Run the Central Valley site first (`SITE = "central-valley"`) and do the sign check in cell 6.
+4. Do the sign check in cell 6 on Portuguese Bend, ascending panel: the slide must be negative.
 5. Set `MAX_PAIRS = None`, run both sites, download each `<site>.zip` and unzip into `app/public/data/<site>/`.
 6. If a part-2 step blocks you, set `RUN_RAIN`, `RUN_GNSS` or `RUN_S1` to False and keep going.
 
@@ -34,7 +34,10 @@ that folder are real. Replace the folder contents with pipeline output.
     SARVIS_SYNTH=1 SARVIS_SYNTH_DIR=/tmp/synth SARVIS_SYNTH_S1_DIR=/tmp/synth_s1 SARVIS_OUT=/tmp/web_data python pipeline/sarvis_pipeline.py
 
 ## Not yet verified against real files
-- Phase sign convention (`PHASE_SIGN`). Check on Central Valley: subsidence must be negative.
+- Phase sign convention (`PHASE_SIGN`). Check on Portuguese Bend ascending: the slide must be negative.
+- First real run (2026-11-14, Central Valley, 3 pairs): 18.6 s per cropped pair; scene-wide tilts of several cm per pair,
+  which is why ionosphere correction (`APPLY_IONO = "auto"`) and per-pair plane removal (`deramp`) were added.
+- The mask layer in real files carries higher bits than opera-utils documents; only its low byte is used.
 - Meaning of the `mask` layer digits (`USE_MASK` is off).
 - Both reference boxes are first guesses.
 - Streaming speed from Colab.

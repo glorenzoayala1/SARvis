@@ -1,0 +1,8 @@
+node_modules/
+.next/
+out/
+web_data/
+__pycache__/
+*.h5
+*.nc
+.DS_Store

@@ -188,7 +188,7 @@ export default function Page() {
       <div className="map"><div ref={mapDiv} /></div>
       <aside className="panel">
         <div>
-          <h1>SARwatch</h1>
+          <h1>SARvis</h1>
           <p className="sub">Ground motion from NISAR L-band radar, every 12 days.</p>
         </div>
         {meta?.synthetic && <div className="banner"><b>Synthetic radar data.</b> The motion shown is made up to test the app. Rainfall and GPS are real. Run the pipeline notebook to replace the radar layers with NISAR and Sentinel-1 measurements.</div>}

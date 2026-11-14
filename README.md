@@ -1,13 +1,13 @@
-# SARwatch
+# SARvis
 
 NASA Space Apps 2026, "Dancing with the SARs". Ground motion from NISAR L-band interferograms,
 for Portuguese Bend (landslide) and the Central Valley near Corcoran (subsidence).
 
 ## Layout
-- `pipeline/SARwatch_pipeline.ipynb`: open in Colab. Searches NISAR GUNW, streams a crop per pair,
+- `pipeline/SARvis_pipeline.ipynb`: open in Colab. Searches NISAR GUNW, streams a crop per pair,
   builds the time series, then adds rainfall (NASA POWER), GPS stations (Nevada Geodetic Lab)
   and the Sentinel-1 record (OPERA DISP-S1). Writes `web_data/<site>/` and `<site>.zip`.
-- `pipeline/sarwatch_pipeline.py`: same code as a script (jupytext pair of the notebook).
+- `pipeline/sarvis_pipeline.py`: same code as a script (jupytext pair of the notebook).
 - `pipeline/make_synthetic.py`, `make_synthetic_s1.py`: write fake NISAR and Sentinel-1 files with a known answer for testing.
 - `app/`: Next.js + MapLibre viewer. Reads `app/public/data/<site>/`.
 
@@ -31,7 +31,7 @@ that folder are real. Replace the folder contents with pipeline output.
 ## Self-test without Earthdata
     python pipeline/make_synthetic.py /tmp/synth portuguese-bend
     python pipeline/make_synthetic_s1.py /tmp/synth_s1 portuguese-bend
-    SARWATCH_SYNTH=1 SARWATCH_SYNTH_DIR=/tmp/synth SARWATCH_SYNTH_S1_DIR=/tmp/synth_s1 SARWATCH_OUT=/tmp/web_data python pipeline/sarwatch_pipeline.py
+    SARVIS_SYNTH=1 SARVIS_SYNTH_DIR=/tmp/synth SARVIS_SYNTH_S1_DIR=/tmp/synth_s1 SARVIS_OUT=/tmp/web_data python pipeline/sarvis_pipeline.py
 
 ## Not yet verified against real files
 - Phase sign convention (`PHASE_SIGN`). Check on Central Valley: subsidence must be negative.

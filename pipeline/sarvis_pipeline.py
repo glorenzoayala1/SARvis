@@ -9,7 +9,7 @@
 # ---
 
 # %% [markdown]
-# # SARwatch pipeline: NISAR GUNW -> ground-motion time series -> web files
+# # SARvis pipeline: NISAR GUNW -> ground-motion time series -> web files
 #
 # NASA Space Apps 2026, "Dancing with the SARs".
 #
@@ -39,7 +39,7 @@
 # %%
 # 1. Install (Colab already has numpy, h5py, matplotlib)
 import os, sys, subprocess
-SYNTH = os.environ.get("SARWATCH_SYNTH") == "1"      # local self-test on fake files; leave unset in Colab
+SYNTH = os.environ.get("SARVIS_SYNTH") == "1"      # local self-test on fake files; leave unset in Colab
 if not SYNTH:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "earthaccess", "pyproj", "h5py"], check=True)
 
@@ -82,7 +82,7 @@ SITES = {
         "site_height_m": 60.0,
     },
 }
-SITE = os.environ.get("SARWATCH_SITE", "portuguese-bend")
+SITE = os.environ.get("SARVIS_SITE", "portuguese-bend")
 SHORT_NAME = "NISAR_L2_GUNW_PROVISIONAL_V1"
 COH_MIN = 0.3            # pixels below this coherence are dropped for that pair
 USE_MASK = False         # see cell 4 before turning on
@@ -94,7 +94,7 @@ S1_SIGN = 1.0            # CHECK in cell 10, same test as PHASE_SIGN: sinking gr
 SURVEY_CSV = None        # optional on-slide survey points: columns id,lat,lon,date(YYYYMMDD),east_cm,north_cm,up_cm
 WORKERS = 4
 FSSPEC = {"cache_type": "background", "block_size": 16 * 1024 * 1024}   # ASF's suggested starting point
-OUT = Path(os.environ.get("SARWATCH_OUT", "web_data")) / SITE
+OUT = Path(os.environ.get("SARVIS_OUT", "web_data")) / SITE
 OUT.mkdir(parents=True, exist_ok=True)
 cfg = SITES[SITE]
 print(SITE, cfg["bbox"])
@@ -125,7 +125,7 @@ def pick(urls, tr):
     return [(k[0], k[1], v[1]) for k, v in sorted(best.items())]
 
 if SYNTH:
-    urls = sorted(str(p) for p in Path(os.environ["SARWATCH_SYNTH_DIR"]).glob("*.h5"))
+    urls = sorted(str(p) for p in Path(os.environ["SARVIS_SYNTH_DIR"]).glob("*.h5"))
     open_file = lambda u: h5py.File(u, "r")
 else:
     import earthaccess
@@ -319,7 +319,7 @@ D0, D1 = all_dates[0], all_dates[-1]
 #    on the slide. Swap in GPM IMERG if you want finer rain; it needs Earthdata login.
 import urllib.request
 def http(u, binary=False):
-    with urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "sarwatch"}), timeout=120) as r:
+    with urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "sarvis"}), timeout=120) as r:
         b = r.read()
     return b if binary else b.decode("utf-8", "replace")
 
@@ -410,7 +410,7 @@ def read_los_tif(src):
 
 if RUN_S1:
     if SYNTH:
-        sdir = Path(os.environ["SARWATCH_SYNTH_S1_DIR"])
+        sdir = Path(os.environ["SARVIS_SYNTH_S1_DIR"])
         s1_urls = sorted(str(p) for p in sdir.glob("*.nc")); los_urls = sorted(str(p) for p in sdir.glob("*enu.tif"))
         open_tif = lambda u: u
     else:

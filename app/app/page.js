@@ -26,6 +26,8 @@ export default function Page() {
   const [t, setT] = useState(0);
   const [pick, setPick] = useState(null);       // {i, j, lon, lat, station?}
   const [playing, setPlaying] = useState(false);
+  const [ready, setReady] = useState(false);    // map style loaded (isStyleLoaded() flips false while tiles load, so track it ourselves)
+  const cardRef = useRef(null);
 
   useEffect(() => { fetch("data/index.json").then((r) => r.json()).then((s) => { setSites(s); setSiteId(s[0]); }); }, []);
 
@@ -43,7 +45,7 @@ export default function Page() {
 
   const load = (m, l) => {
     const k = `${m.id}/${l.file}`;
-    if (!cache.current[k]) cache.current[k] = fetch(`data/${k}`).then((r) => r.arrayBuffer()).then((b) => (l.static ? new Uint8Array(b) : new Int16Array(b)));
+    if (!cache.current[k]) cache.current[k] = fetch(`data/${k}`).then((r) => r.arrayBuffer()).then((b) => { const g = l.static ? new Uint8Array(b) : new Int16Array(b); g._key = l.key; return g; });
     return cache.current[k];
   };
   useEffect(() => {
@@ -60,9 +62,12 @@ export default function Page() {
       container: mapDiv.current,
       style: { version: 8, sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
         layers: [{ id: "osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.8, "raster-brightness-max": 0.75 } }] },
-      center: [-118.37, 33.75], zoom: 11,
+      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, pitchWithRotate: false,
     });
-    map.current.addControl(new maplibregl.NavigationControl(), "top-left");
+    map.current.touchZoomRotate.disableRotation();
+    map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    map.current.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
+    map.current.on("load", () => setReady(true));
     canvas.current = document.createElement("canvas");
   }, []);
 
@@ -73,10 +78,12 @@ export default function Page() {
   };
 
   useEffect(() => {
-    if (!meta || !map.current) return;
+    if (!meta || !map.current || !ready) return;
     const m = map.current, [w, s, e, n] = meta.bbox;
-    m.fitBounds([[w, s], [e, n]], { padding: 40, duration: 0 });
-    const onClick = (ev) => { const p = toPixel(ev.lngLat.lng, ev.lngLat.lat); if (p) setPick(p); };
+    const phone = window.innerWidth <= 800;
+    m.fitBounds([[w, s], [e, n]], { padding: { top: phone ? 48 : 40, bottom: phone ? 120 : 120, left: phone ? 16 : 40, right: phone ? 16 : 40 }, duration: 0 });
+    if (phone) document.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");   // start collapsed; the (i) button still opens it
+    const onClick = (ev) => { const p = toPixel(ev.lngLat.lng, ev.lngLat.lat); if (p) { setPick(p); if (window.innerWidth <= 800) setTimeout(() => cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); } };
     m.on("click", onClick);
     const boxes = { type: "FeatureCollection", features: [["#f0efec", meta.ref_box], ["#eda100", meta.focus_box]].filter((b) => b[1])
       .map(([color, b]) => ({ type: "Feature", properties: { color }, geometry: { type: "LineString", coordinates: boxLine(b) } })) };
@@ -85,9 +92,9 @@ export default function Page() {
       else { m.addSource("boxes", { type: "geojson", data: boxes });
         m.addLayer({ id: "boxes", type: "line", source: "boxes", paint: { "line-color": ["get", "color"], "line-width": 1.5, "line-dasharray": [2, 2] } }); }
     };
-    m.isStyleLoaded() ? draw() : m.once("load", draw);
+    draw();
     return () => m.off("click", onClick);
-  }, [meta]);
+  }, [meta, ready]);
 
   // GPS / survey stations as clickable markers
   useEffect(() => {
@@ -103,7 +110,7 @@ export default function Page() {
   const lim = layer && !layer.static ? Math.max(layer.p98, 0.5) : 1;
 
   useEffect(() => {
-    if (!meta || !grid || !layer || !map.current) return;
+    if (!meta || !grid || !layer || !map.current || !ready || grid._key !== layer.key) return;
     const { nx, ny } = meta, c = canvas.current;
     c.width = nx; c.height = ny;
     const g2 = c.getContext("2d"), img = g2.createImageData(nx, ny), off = layer.static ? 0 : t * nx * ny;
@@ -119,14 +126,17 @@ export default function Page() {
       img.data.set([rgb[0], rgb[1], rgb[2], a], p * 4);
     }
     g2.putImageData(img, 0, 0);
-    const [w, s, e, n] = meta.bbox, coords = [[w, n], [e, n], [e, s], [w, s]], url = c.toDataURL();
-    const apply = () => {
-      const src = map.current.getSource("sar");
-      if (src) src.updateImage({ url, coordinates: coords });
-      else { map.current.addSource("sar", { type: "image", url, coordinates: coords }); map.current.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": "nearest", "raster-fade-duration": 0 } }, map.current.getLayer("boxes") ? "boxes" : undefined); }
-    };
-    map.current.isStyleLoaded() ? apply() : map.current.once("load", apply);
-  }, [meta, grid, t, layerKey]);
+    // A canvas source repaints straight from the canvas: no image decode, no aborted loads while scrubbing.
+    const [w, s, e, n] = meta.bbox, coords = [[w, n], [e, n], [e, s], [w, s]], m = map.current;
+    let src = m.getSource("sar");
+    if (src && src._site !== meta.id) { m.removeLayer("sar"); m.removeSource("sar"); src = null; }
+    if (!src) {
+      m.addSource("sar", { type: "canvas", canvas: c, coordinates: coords, animate: false });
+      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": "nearest", "raster-fade-duration": 0 } }, m.getLayer("boxes") ? "boxes" : undefined);
+      src = m.getSource("sar"); src._site = meta.id;
+    }
+    src.play(); src.pause(); m.triggerRepaint();
+  }, [meta, grid, t, layerKey, ready]);
 
   const pin = useRef(null);
   useEffect(() => {
@@ -152,11 +162,11 @@ export default function Page() {
   });
 
   const chart = useMemo(() => {
-    if (!pick || !grid || !layer || layer.static || !meta) return null;
+    if (!pick || !grid || !layer || layer.static || !meta || grid._key !== layer.key) return null;
     const win = pick.station ? 1 : 0, lines = [];
     const main = seriesAt(grid, layer, pick, win);
     lines.push({ id: layer.sensor, pts: main });
-    if (otherLayer && other) lines.push({ id: otherLayer.sensor, pts: seriesAt(other, otherLayer, pick, win) });
+    if (otherLayer && other && other._key === otherLayer.key) lines.push({ id: otherLayer.sensor, pts: seriesAt(other, otherLayer, pick, win) });
     let stat = null;
     const st = pick.station && ctx?.gnss?.stations.find((s) => s.id === pick.station);
     if (st) {
@@ -181,46 +191,69 @@ export default function Page() {
   }, [ctx, layerKey, meta]);
 
   const cov = ctx?.coverage;
-  const groups = meta ? [["nisar", "NISAR (L-band)"], ["s1", "Sentinel-1 (C-band)"]].map(([s, label]) => [label, meta.layers.filter((l) => (l.sensor || "nisar") === s)]).filter((g) => g[1].length) : [];
+  const SENSORS = [["nisar", "NISAR", "L-band"], ["s1", "Sentinel-1", "C-band"]];
+  const KINDS = [["up", "Vertical"], ["east", "East-west"], ["asc_los", "Ascending view"], ["desc_los", "Descending view"], ["coh", "Signal quality"]];
+  const ENDS = { up: ["down", "up"], east: ["west", "east"], asc_los: ["away from satellite", "toward satellite"], desc_los: ["away from satellite", "toward satellite"] };
+  const sensor = layer?.sensor || "nisar";
+  const has = (sn, kd) => meta?.layers.find((l) => (l.sensor || "nisar") === sn && l.kind === kd);
+  const choose = (sn, kd) => { const l = has(sn, kd) || meta.layers.find((x) => (x.sensor || "nisar") === sn); if (l) { setPlaying(false); setLayerKey(l.key); } };
+  const pretty = (id) => id.split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+  const kindName = layer ? (KINDS.find((k) => k[0] === layer.kind) || [0, layer.label])[1] : "";
+  const ends = layer && ENDS[layer.kind];
+  const cur = chart && chart.lines[0].pts.find((p) => p.d === layer.dates[t]);
+  const fmtCm = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)} cm`;
 
   return (
     <div className="shell">
-      <div className="map"><div ref={mapDiv} /></div>
+      <div className="map">
+        <div ref={mapDiv} />
+        {meta && layer && (
+          <div className="timebar">
+            {!pick && grid && <div className="hint">Tap the map to read one spot</div>}
+            {!grid && <div className="hint">Loading…</div>}
+            {!layer.static ? (<>
+              <div className="trow">
+                <button className="play" aria-label={playing ? "Pause" : "Play"} onClick={() => setPlaying((p) => !p)}>{playing ? "❚❚" : "▶"}</button>
+                <div className="tdate"><span className="muted">since {fmtDate(layer.dates[0])}</span><b>{fmtDate(layer.dates[t])}</b></div>
+                <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
+              </div>
+              <div className="ramp" style={{ background: `linear-gradient(90deg, rgb(${NEG}), rgb(${MID}), rgb(${POS}))` }} />
+              <div className="row"><span>−{lim.toFixed(1)} cm {ends ? ends[0] : ""}</span><span>+{lim.toFixed(1)} cm {ends ? ends[1] : ""}</span></div>
+            </>) : (<>
+              <div className="ramp" style={{ background: "linear-gradient(90deg, rgb(20,24,32), rgb(150,200,255))" }} />
+              <div className="row"><span>0 signal lost</span><span>1 stable signal</span></div>
+            </>)}
+          </div>
+        )}
+      </div>
       <aside className="panel">
-        <div>
+        <header>
           <h1>SARvis</h1>
           <p className="sub">Ground motion from NISAR L-band radar, every 12 days.</p>
+        </header>
+        {meta?.synthetic && <div className="banner"><b>Demo data.</b> Radar motion is synthetic. Rainfall and GPS are real.</div>}
+        <div className="seg" role="tablist" aria-label="Site">
+          {sites.map((sid) => <button key={sid} role="tab" aria-selected={sid === siteId} className={sid === siteId ? "on" : ""} onClick={() => setSiteId(sid)}>{pretty(sid)}</button>)}
         </div>
-        {meta?.synthetic && <div className="banner"><b>Synthetic radar data.</b> The motion shown is made up to test the app. Rainfall and GPS are real. Run the pipeline notebook to replace the radar layers with NISAR and Sentinel-1 measurements.</div>}
-        <div>
-          <label htmlFor="site">Site</label>
-          <select id="site" value={siteId || ""} onChange={(e) => setSiteId(e.target.value)}>{sites.map((s) => <option key={s} value={s}>{s}</option>)}</select>
-          {meta && <p className="muted" style={{ margin: "6px 0 0" }}>{meta.name}</p>}
-        </div>
+        {meta && <p className="muted" style={{ margin: "-10px 0 0" }}>{meta.name}</p>}
         {meta && layer && (<>
           <div>
-            <label htmlFor="layer">Measurement</label>
-            <select id="layer" value={layerKey} onChange={(e) => setLayerKey(e.target.value)}>
-              {groups.map(([label, ls]) => <optgroup key={label} label={label}>{ls.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}</optgroup>)}
-            </select>
+            <label>Sensor</label>
+            <div className="seg">
+              {SENSORS.filter(([k]) => meta.layers.some((l) => (l.sensor || "nisar") === k)).map(([k, name, band]) => (
+                <button key={k} className={sensor === k ? "on" : ""} aria-pressed={sensor === k} onClick={() => choose(k, layer.kind)}><i style={{ background: C[k] }} />{name} <small>{band}</small></button>))}
+            </div>
           </div>
-          {!layer.static ? (
-            <div>
-              <div className="row"><span>Change since {fmtDate(layer.dates[0])}</span><button className="play" onClick={() => setPlaying((p) => !p)}>{playing ? "Pause" : "Play"}</button></div>
-              <div className="date">{fmtDate(layer.dates[t])}</div>
-              <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
-              <div className="ramp" style={{ background: `linear-gradient(90deg, rgb(${NEG}), rgb(${MID}), rgb(${POS}))`, marginTop: 10 }} />
-              <div className="row"><span>−{lim.toFixed(1)} cm</span><span>0</span><span>+{lim.toFixed(1)} cm</span></div>
+          <div>
+            <label>Measurement</label>
+            <div className="chips">
+              {KINDS.filter(([k]) => has(sensor, k)).map(([k, name]) => <button key={k} className={layer.kind === k ? "on" : ""} aria-pressed={layer.kind === k} onClick={() => choose(sensor, k)}>{name}</button>)}
             </div>
-          ) : (
-            <div>
-              <div className="ramp" style={{ background: "linear-gradient(90deg, rgb(20,24,32), rgb(150,200,255))" }} />
-              <div className="row"><span>0 (signal lost)</span><span>1 (stable signal)</span></div>
-            </div>
-          )}
-          <div className="card">
-            <h2>{pick ? (pick.station ? `Ground check at station ${pick.station}` : `Pixel at ${pick.lat.toFixed(4)}, ${pick.lon.toFixed(4)}`) : "Click the map or a station to read one place"}</h2>
-            <p className="muted" style={{ margin: "0 0 8px" }}>{layer.static ? "Pick a motion layer to see a time series." : `${layer.label.replace(/^(NISAR|Sentinel-1) /, "")}, cm`}</p>
+          </div>
+          <div className="card" ref={cardRef}>
+            <h2>{pick ? (pick.station ? `Ground check at station ${pick.station}` : `Spot at ${pick.lat.toFixed(4)}, ${pick.lon.toFixed(4)}`) : "Pick a spot"}</h2>
+            <p className="muted" style={{ margin: "0 0 8px" }}>{layer.static ? "Choose a motion measurement to see change over time." : pick ? `${kindName} motion, cm` : "Tap the map, or a labelled GPS station, to see how that spot moved."}</p>
+            {cur && cur.y !== null && <div className="hero">{fmtCm(cur.y)}<small> {ends ? (cur.y >= 0 ? ends[1] : ends[0]) : ""} by {fmtDate(layer.dates[t])}</small></div>}
             {chart && <Chart lines={chart.lines} markX={toDay(layer.dates[t])} />}
             {chart?.stat && <p className="muted" style={{ margin: "8px 0 0" }}>Radar minus GPS, root-mean-square: <b style={{ color: "var(--ink)" }}>{chart.stat.rms.toFixed(2)} cm</b> over {chart.stat.n} dates{ctx.gnss.ref ? ` (GPS relative to station ${ctx.gnss.ref})` : " (GPS not referenced; compare vertical only)"}.</p>}
           </div>
@@ -234,22 +267,25 @@ export default function Page() {
           )}
           {cov && (
             <div className="card">
-              <h2>Focus-area pixels measured on every date</h2>
-              <p className="muted" style={{ margin: "0 0 10px" }}>Higher means the radar kept its signal where the ground moves.</p>
+              <h2>How much of the focus area each radar could measure</h2>
+              <p className="muted" style={{ margin: "0 0 10px" }}>Share of pixels in the yellow box with a reading on every date.</p>
               <div className="tiles">
-                {[["nisar", "NISAR (L-band)"], ["s1", "Sentinel-1 (C-band)"]].map(([k, label]) => (
-                  <div key={k} className="tile"><span className="swatch" style={{ background: C[k] }} /><span className="muted">{label}</span>
-                    <div className="big">{pct(cov[k]?.asc)} <small>asc</small> · {pct(cov[k]?.desc)} <small>desc</small></div></div>))}
+                {SENSORS.map(([k, name, band]) => (
+                  <div key={k} className="tile"><span className="swatch" style={{ background: C[k] }} /><span className="muted">{name} ({band})</span>
+                    <div className="big">{pct(cov[k]?.asc)} <small>ascending</small> · {pct(cov[k]?.desc)} <small>descending</small></div></div>))}
               </div>
             </div>
           )}
-          <ul className="notes">
-            <li>Each pixel is about 80 m. Motion is relative to the white dashed reference area, which is assumed stable. The yellow dashed box is the focus area used for the coverage numbers.</li>
-            <li>The radar sees motion toward or away from the satellite. North-south motion is nearly invisible (about 12% of it shows up), so vertical and east-west values absorb some of it.</li>
-            <li>A pixel that loses signal on any date is blank from then on.</li>
-            <li>Sentinel-1 values are OPERA DISP-S1 at 30 m, sampled onto the NISAR grid. The two sensors use different dates.</li>
-            <li>Source: {meta.source}, provisional products, not yet fully validated by NASA.</li>
-          </ul>
+          <details className="card">
+            <summary>How to read this</summary>
+            <ul className="notes">
+              <li>Each pixel is about 80 m. Motion is relative to the white dashed reference area, which is assumed stable. The yellow dashed box is the focus area used for the coverage numbers.</li>
+              <li>The radar sees motion toward or away from the satellite. North-south motion is nearly invisible (about 12% of it shows up), so vertical and east-west values absorb some of it.</li>
+              <li>A pixel that loses signal on any date is blank from then on.</li>
+              <li>Sentinel-1 values are OPERA DISP-S1 at 30 m, sampled onto the NISAR grid. The two sensors use different dates.</li>
+              <li>Source: {meta.source}, provisional products, not yet fully validated by NASA.</li>
+            </ul>
+          </details>
         </>)}
       </aside>
     </div>
@@ -276,7 +312,7 @@ function Chart({ lines, markX }) {
   return (
     <div>
       {lines.length > 1 && <div className="legend">{lines.map((l) => <span key={l.id}><i style={{ background: C[l.id] }} />{NAME[l.id]}</span>)}</div>}
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Displacement time series" onMouseMove={onMove} onMouseLeave={() => setHx(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Displacement time series" onPointerDown={onMove} onPointerMove={onMove} onPointerLeave={() => setHx(null)} style={{ touchAction: "pan-y" }}>
         {ticks.map((v) => (<g key={v}><line x1={m.l} x2={W - m.r} y1={sy(v)} y2={sy(v)} stroke="#383835" strokeWidth={v === 0 ? 1.5 : 1} /><text x={m.l - 6} y={sy(v) + 4} textAnchor="end">{v.toFixed(1)}</text></g>))}
         <text x={m.l} y={H - 6}>{dayStr(x0)}</text><text x={W - m.r} y={H - 6} textAnchor="end">{dayStr(x1)}</text>
         {markX >= x0 && markX <= x1 && <line x1={sx(markX)} x2={sx(markX)} y1={m.t} y2={H - m.b} stroke="#8a8985" strokeDasharray="3 3" />}
@@ -296,7 +332,7 @@ function Bars({ pts, x0, x1, markX }) {
   const h = hx !== null ? pts.reduce((a, p) => (Math.abs(p.x - hx) < Math.abs(a.x - hx) ? p : a)) : null;
   const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); setHx(x0 + ((((e.clientX - r.left) / r.width) * W - m.l) / (W - m.l - m.r)) * (x1 - x0)); };
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Daily rainfall" onMouseMove={onMove} onMouseLeave={() => setHx(null)}>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Daily rainfall" onPointerDown={onMove} onPointerMove={onMove} onPointerLeave={() => setHx(null)} style={{ touchAction: "pan-y" }}>
       <line x1={m.l} x2={W - m.r} y1={sy(0)} y2={sy(0)} stroke="#383835" strokeWidth="1.5" />
       <line x1={m.l} x2={W - m.r} y1={sy(hi)} y2={sy(hi)} stroke="#383835" />
       <text x={m.l - 6} y={sy(hi) + 4} textAnchor="end">{hi.toFixed(0)}</text><text x={m.l - 6} y={sy(0) + 4} textAnchor="end">0</text>

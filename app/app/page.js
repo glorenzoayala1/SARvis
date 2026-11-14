@@ -26,6 +26,7 @@ export default function Page() {
   const [t, setT] = useState(0);
   const [pick, setPick] = useState(null);       // {i, j, lon, lat, station?}
   const [playing, setPlaying] = useState(false);
+  const [mode, setMode] = useState("total");    // "total" = change since first date, "speed" = cm per 30 days between dates
   const [ready, setReady] = useState(false);    // map style loaded (isStyleLoaded() flips false while tiles load, so track it ourselves)
   const cardRef = useRef(null);
 
@@ -107,7 +108,24 @@ export default function Page() {
     });
   }, [meta, ctx]);
 
-  const lim = layer && !layer.static ? Math.max(layer.p98, 0.5) : 1;
+  const speed = mode === "speed" && layer && !layer.static;
+  // value shown at date index k for flat pixel index p: running total, or speed since the previous date
+  const valueAt = (g, l, k, p) => {
+    const n = meta.nx * meta.ny, q = g[k * n + p];
+    if (q === meta.nodata) return null;
+    if (!speed) return q * meta.scale;
+    const k1 = Math.max(k, 1), a = g[(k1 - 1) * n + p], b = g[k1 * n + p];
+    if (a === meta.nodata || b === meta.nodata) return null;
+    return ((b - a) * meta.scale * 30) / (toDay(l.dates[k1]) - toDay(l.dates[k1 - 1]));
+  };
+  const lim = useMemo(() => {
+    if (!layer || layer.static) return 1;
+    if (!speed || !grid || grid._key !== layer.key) return Math.max(layer.p98, 0.5);
+    const n = meta.nx * meta.ny, v = [];
+    for (let k = 1; k < layer.dates.length; k++) for (let p = k % 7; p < n; p += 7) { const x = valueAt(grid, layer, k, p); if (x !== null) v.push(Math.abs(x)); }
+    v.sort((a, b) => a - b);
+    return Math.max(v[Math.floor(v.length * 0.98)] || 0.5, 0.5);
+  }, [layer, grid, speed, meta]);
 
   useEffect(() => {
     if (!meta || !grid || !layer || !map.current || !ready || grid._key !== layer.key) return;
@@ -119,9 +137,9 @@ export default function Page() {
       let rgb, a = 215;
       if (layer.static) rgb = mix([20, 24, 32], [150, 200, 255], grid[p] / 255);
       else {
-        const q = grid[off + p];
-        if (q === meta.nodata) { a = 0; rgb = MID; }
-        else { const v = Math.max(-1, Math.min(1, (q * meta.scale) / lim)); rgb = v >= 0 ? mix(MID, POS, v) : mix(MID, NEG, -v); a = 30 + 200 * Math.min(1, Math.abs(v) * 2.5); }
+        const val = valueAt(grid, layer, t, p);
+        if (val === null) { a = 0; rgb = MID; }
+        else { const v = Math.max(-1, Math.min(1, val / lim)); rgb = v >= 0 ? mix(MID, POS, v) : mix(MID, NEG, -v); a = 30 + 200 * Math.min(1, Math.abs(v) * 2.5); }
       }
       img.data.set([rgb[0], rgb[1], rgb[2], a], p * 4);
     }
@@ -136,7 +154,7 @@ export default function Page() {
       src = m.getSource("sar"); src._site = meta.id;
     }
     src.play(); src.pause(); m.triggerRepaint();
-  }, [meta, grid, t, layerKey, ready]);
+  }, [meta, grid, t, layerKey, ready, mode, lim]);
 
   const pin = useRef(null);
   useEffect(() => {
@@ -155,7 +173,7 @@ export default function Page() {
     const vals = [];
     for (let dj = -win; dj <= win; dj++) for (let di = -win; di <= win; di++) {
       const i = p.i + di, j = p.j + dj; if (i < 0 || j < 0 || i >= meta.nx || j >= meta.ny) continue;
-      const q = g[k * meta.nx * meta.ny + j * meta.nx + i]; if (q !== meta.nodata) vals.push(q * meta.scale);
+      const x = valueAt(g, l, k, j * meta.nx + i); if (x !== null) vals.push(x);
     }
     vals.sort((a, b) => a - b);
     return { d, x: toDay(d), y: vals.length ? vals[Math.floor(vals.length / 2)] : null };
@@ -168,7 +186,7 @@ export default function Page() {
     lines.push({ id: layer.sensor, pts: main });
     if (otherLayer && other && other._key === otherLayer.key) lines.push({ id: otherLayer.sensor, pts: seriesAt(other, otherLayer, pick, win) });
     let stat = null;
-    const st = pick.station && ctx?.gnss?.stations.find((s) => s.id === pick.station);
+    const st = !speed && pick.station && ctx?.gnss?.stations.find((s) => s.id === pick.station);
     if (st) {
       const los = layer.sensor === "s1" ? meta.los_s1 : meta.los, v = layer.kind.endsWith("_los") ? los?.[layer.kind.replace("_los", "")] : null;
       const proj = (k) => layer.kind === "up" ? st.u[k] : layer.kind === "east" ? st.e[k] : v ? v.e * st.e[k] + v.n * st.n[k] + v.u * st.u[k] : null;
@@ -182,7 +200,7 @@ export default function Page() {
       }
     }
     return { lines, stat };
-  }, [pick, grid, other, layerKey, meta, ctx]);
+  }, [pick, grid, other, layerKey, meta, ctx, mode]);
 
   const rain = useMemo(() => {
     if (!ctx?.rain || !layer || layer.static) return null;
@@ -190,6 +208,15 @@ export default function Page() {
     return { x0, x1, pts: ctx.rain.dates.map((d, k) => ({ d, x: toDay(d), y: ctx.rain.mm[k] })).filter((p) => p.x >= x0 && p.x <= x1 && p.y !== null) };
   }, [ctx, layerKey, meta]);
 
+  const wind = useMemo(() => {
+    if (!ctx?.wind || !layer || layer.static) return null;
+    const x0 = toDay(layer.dates[0]), x1 = toDay(layer.dates[layer.dates.length - 1]);
+    const pts = ctx.wind.dates.map((d, k) => ({ d, x: toDay(d), y: ctx.wind.max[k], mean: ctx.wind.speed[k], dir: ctx.wind.dir[k] })).filter((p) => p.x >= x0 && p.x <= x1 && p.y !== null);
+    return { x0, x1, pts };
+  }, [ctx, layerKey, meta]);
+  const windNow = wind && layer && wind.pts.find((p) => p.d === layer.dates[t]);
+  const compass = (deg) => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8];
+  const wl = meta?.wavelength_cm;
   const cov = ctx?.coverage;
   const SENSORS = [["nisar", "NISAR", "L-band"], ["s1", "Sentinel-1", "C-band"]];
   const KINDS = [["up", "Vertical"], ["east", "East-west"], ["asc_los", "Ascending view"], ["desc_los", "Descending view"], ["coh", "Signal quality"]];
@@ -201,7 +228,8 @@ export default function Page() {
   const kindName = layer ? (KINDS.find((k) => k[0] === layer.kind) || [0, layer.label])[1] : "";
   const ends = layer && ENDS[layer.kind];
   const cur = chart && chart.lines[0].pts.find((p) => p.d === layer.dates[t]);
-  const fmtCm = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)} cm`;
+  const unit = speed ? "cm/month" : "cm";
+  const fmtCm = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)} ${unit}`;
 
   return (
     <div className="shell">
@@ -214,11 +242,11 @@ export default function Page() {
             {!layer.static ? (<>
               <div className="trow">
                 <button className="play" aria-label={playing ? "Pause" : "Play"} onClick={() => setPlaying((p) => !p)}>{playing ? "❚❚" : "▶"}</button>
-                <div className="tdate"><span className="muted">since {fmtDate(layer.dates[0])}</span><b>{fmtDate(layer.dates[t])}</b></div>
+                <div className="tdate"><span className="muted">{speed ? "speed around" : `since ${fmtDate(layer.dates[0])}`}</span><b>{fmtDate(layer.dates[t])}</b></div>
                 <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
               </div>
               <div className="ramp" style={{ background: `linear-gradient(90deg, rgb(${NEG}), rgb(${MID}), rgb(${POS}))` }} />
-              <div className="row"><span>−{lim.toFixed(1)} cm {ends ? ends[0] : ""}</span><span>+{lim.toFixed(1)} cm {ends ? ends[1] : ""}</span></div>
+              <div className="row"><span>−{lim.toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span>+{lim.toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
             </>) : (<>
               <div className="ramp" style={{ background: "linear-gradient(90deg, rgb(20,24,32), rgb(150,200,255))" }} />
               <div className="row"><span>0 signal lost</span><span>1 stable signal</span></div>
@@ -250,10 +278,16 @@ export default function Page() {
               {KINDS.filter(([k]) => has(sensor, k)).map(([k, name]) => <button key={k} className={layer.kind === k ? "on" : ""} aria-pressed={layer.kind === k} onClick={() => choose(sensor, k)}>{name}</button>)}
             </div>
           </div>
+          {!layer.static && (
+            <div className="seg" aria-label="Show">
+              <button className={!speed ? "on" : ""} aria-pressed={!speed} onClick={() => setMode("total")}>Total change</button>
+              <button className={speed ? "on" : ""} aria-pressed={speed} onClick={() => setMode("speed")}>Speed</button>
+            </div>
+          )}
           <div className="card" ref={cardRef}>
             <h2>{pick ? (pick.station ? `Ground check at station ${pick.station}` : `Spot at ${pick.lat.toFixed(4)}, ${pick.lon.toFixed(4)}`) : "Pick a spot"}</h2>
-            <p className="muted" style={{ margin: "0 0 8px" }}>{layer.static ? "Choose a motion measurement to see change over time." : pick ? `${kindName} motion, cm` : "Tap the map, or a labelled GPS station, to see how that spot moved."}</p>
-            {cur && cur.y !== null && <div className="hero">{fmtCm(cur.y)}<small> {ends ? (cur.y >= 0 ? ends[1] : ends[0]) : ""} by {fmtDate(layer.dates[t])}</small></div>}
+            <p className="muted" style={{ margin: "0 0 8px" }}>{layer.static ? "Choose a motion measurement to see change over time." : pick ? `${kindName} ${speed ? "speed, cm per month" : "motion, cm"}` : "Tap the map, or a labelled GPS station, to see how that spot moved."}</p>
+            {cur && cur.y !== null && <div className="hero">{fmtCm(cur.y)}<small> {ends ? (cur.y >= 0 ? ends[1] : ends[0]) : ""} {speed ? "around" : "by"} {fmtDate(layer.dates[t])}</small></div>}
             {chart && <Chart lines={chart.lines} markX={toDay(layer.dates[t])} />}
             {chart?.stat && <p className="muted" style={{ margin: "8px 0 0" }}>Radar minus GPS, root-mean-square: <b style={{ color: "var(--ink)" }}>{chart.stat.rms.toFixed(2)} cm</b> over {chart.stat.n} dates{ctx.gnss.ref ? ` (GPS relative to station ${ctx.gnss.ref})` : " (GPS not referenced; compare vertical only)"}.</p>}
           </div>
@@ -263,6 +297,38 @@ export default function Page() {
               <p className="muted" style={{ margin: "0 0 8px" }}>Regional estimate at the site centre.</p>
               <Bars pts={rain.pts} x0={rain.x0} x1={rain.x1} markX={toDay(layer.dates[t])} />
               <p className="muted" style={{ margin: "6px 0 0" }}>{ctx.rain.source}</p>
+            </div>
+          )}
+          {wind && wind.pts.length > 0 && (
+            <div className="card">
+              <h2>Strongest daily wind, m/s</h2>
+              <p className="muted" style={{ margin: "0 0 8px" }}>Regional estimate at the site centre, 10 m above ground.</p>
+              {windNow && (
+                <div className="windnow">
+                  <svg viewBox="-20 -20 40 40" width="44" height="44" role="img" aria-label={`Wind from ${compass(windNow.dir)}`}>
+                    <circle r="18" fill="none" stroke="#383835" strokeWidth="1.5" /><text y="-9" textAnchor="middle" style={{ fontSize: 7 }}>N</text>
+                    <g transform={`rotate(${windNow.dir + 180})`}><path d="M0,-13 L5,-3 L1.5,-3 L1.5,12 L-1.5,12 L-1.5,-3 L-5,-3 Z" fill="#f0efec" /></g>
+                  </svg>
+                  <div><b>{windNow.y.toFixed(1)} m/s</b> peak, {windNow.mean.toFixed(1)} average<br /><span className="muted">from the {compass(windNow.dir)} on {fmtDate(windNow.d)}</span></div>
+                </div>
+              )}
+              <Bars pts={wind.pts} x0={wind.x0} x1={wind.x1} markX={toDay(layer.dates[t])} unit="m/s" label="Daily peak wind" />
+              <p className="muted" style={{ margin: "6px 0 0" }}>{ctx.wind.source}</p>
+            </div>
+          )}
+          {wl && (
+            <div className="card">
+              <h2>Why the two radars can disagree</h2>
+              <p className="muted" style={{ margin: "0 0 10px" }}>A radar loses track when neighbouring pixels move apart by more than a quarter of its wavelength between two passes.</p>
+              <div className="tiles">
+                {SENSORS.map(([k, name, band]) => (
+                  <div key={k} className="tile">
+                    <span className="swatch" style={{ background: C[k] }} /><span className="muted">{name} ({band}), {wl[k].toFixed(1)} cm wavelength</span>
+                    <div className="meter"><i style={{ width: `${(100 * wl[k]) / Math.max(wl.nisar, wl.s1)}%`, background: C[k] }} /></div>
+                    <div className="big">{(wl[k] / 4).toFixed(1)} cm <small>largest step it can follow</small></div>
+                  </div>))}
+              </div>
+              <p className="muted" style={{ margin: "10px 0 0" }}>Shorter wavelengths (X-band, about 3 cm) see finer detail but lose fast motion sooner. Longer ones (P-band, 30 to 100 cm) are used for forests, not ground motion.</p>
             </div>
           )}
           {cov && (
@@ -325,7 +391,7 @@ function Chart({ lines, markX }) {
   );
 }
 
-function Bars({ pts, x0, x1, markX }) {
+function Bars({ pts, x0, x1, markX, unit = "mm", label = "Daily rainfall" }) {
   const [hx, setHx] = useHover();
   const W = 330, H = 110, m = { l: 40, r: 10, t: 18, b: 22 };
   const hi = Math.max(1, ...pts.map((p) => p.y)), bw = Math.max(1, (W - m.l - m.r) / (x1 - x0 + 1) - 0.6);
@@ -333,14 +399,14 @@ function Bars({ pts, x0, x1, markX }) {
   const h = hx !== null ? pts.reduce((a, p) => (Math.abs(p.x - hx) < Math.abs(a.x - hx) ? p : a)) : null;
   const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); setHx(x0 + ((((e.clientX - r.left) / r.width) * W - m.l) / (W - m.l - m.r)) * (x1 - x0)); };
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Daily rainfall" onPointerDown={onMove} onPointerMove={onMove} onPointerLeave={() => setHx(null)} style={{ touchAction: "pan-y" }}>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={label} onPointerDown={onMove} onPointerMove={onMove} onPointerLeave={() => setHx(null)} style={{ touchAction: "pan-y" }}>
       <line x1={m.l} x2={W - m.r} y1={sy(0)} y2={sy(0)} stroke="#383835" strokeWidth="1.5" />
       <line x1={m.l} x2={W - m.r} y1={sy(hi)} y2={sy(hi)} stroke="#383835" />
       <text x={m.l - 6} y={sy(hi) + 4} textAnchor="end">{hi.toFixed(0)}</text><text x={m.l - 6} y={sy(0) + 4} textAnchor="end">0</text>
       <text x={m.l} y={H - 5}>{fmtDate(pts[0].d)}</text><text x={W - m.r} y={H - 5} textAnchor="end">{fmtDate(pts[pts.length - 1].d)}</text>
       {markX >= x0 && markX <= x1 && <line x1={sx(markX)} x2={sx(markX)} y1={m.t} y2={H - m.b} stroke="#8a8985" strokeDasharray="3 3" />}
       {pts.map((p) => <rect key={p.d} x={sx(p.x) - bw / 2} y={sy(p.y)} width={bw} height={sy(0) - sy(p.y)} fill={h && h.d === p.d ? "#9ec5f4" : "#5598e7"} />)}
-      {h && <text x={m.l} y={11} style={{ fill: "#f0efec", fontSize: 11 }}>{fmtDate(h.d)}: {h.y.toFixed(1)} mm</text>}
+      {h && <text x={m.l} y={11} style={{ fill: "#f0efec", fontSize: 11 }}>{fmtDate(h.d)}: {h.y.toFixed(1)} {unit}</text>}
     </svg>
   );
 }

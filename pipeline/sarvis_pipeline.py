@@ -365,9 +365,10 @@ all_dates = sorted({d for L in layers.values() for d in L["dates"]})
 D0, D1 = all_dates[0], all_dates[-1]
 
 # %%
-# 8. Rainfall: NASA POWER daily precipitation at the site centre. No login needed.
-#    This is MERRA-2 reanalysis on a coarse grid (about 50 km), so it is regional rain, not a gauge
+# 8. Weather: NASA POWER daily rainfall and wind at the site centre. No login needed.
+#    This is MERRA-2 reanalysis on a coarse grid (about 50 km), so it is regional weather, not a gauge
 #    on the slide. Swap in GPM IMERG if you want finer rain; it needs Earthdata login.
+#    Wind direction is the direction the wind blows FROM, in degrees clockwise from north.
 import urllib.request
 def http(u, binary=False):
     with urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "sarvis"}), timeout=120) as r:
@@ -376,13 +377,17 @@ def http(u, binary=False):
 
 if RUN_RAIN:
     r0 = ymd(day(D0) - 30)
-    u = ("https://power.larc.nasa.gov/api/temporal/daily/point?parameters=PRECTOTCORR&community=AG"
+    u = ("https://power.larc.nasa.gov/api/temporal/daily/point?parameters=PRECTOTCORR,WS10M,WS10M_MAX,WD10M&community=AG"
          f"&longitude={(W + E) / 2:.4f}&latitude={(S + N) / 2:.4f}&start={r0}&end={D1}&format=JSON")
     j = json.loads(http(u))
     pr = j["properties"]["parameter"]["PRECTOTCORR"]
     context["rain"] = {"dates": list(pr), "mm": [None if v < 0 else round(v, 2) for v in pr.values()],
                        "source": "NASA POWER PRECTOTCORR (" + ", ".join(j["header"]["sources"]) + "), mm/day"}
-    print("rain days", len(pr), "total mm %.0f" % sum(v for v in pr.values() if v > 0))
+    par = j["properties"]["parameter"]; clean = lambda k: [None if v < -900 else round(v, 2) for v in par[k].values()]
+    context["wind"] = {"dates": list(par["WS10M"]), "speed": clean("WS10M"), "max": clean("WS10M_MAX"), "dir": clean("WD10M"),
+                       "source": "NASA POWER 10 m wind (" + ", ".join(j["header"]["sources"]) + "), m/s; direction = where the wind blows from"}
+    print("rain days", len(pr), "total mm %.0f" % sum(v for v in pr.values() if v > 0),
+          "| strongest daily max wind %.1f m/s" % max(v for v in par["WS10M_MAX"].values() if v > -900))
 
 # %%
 # 9. GPS ground check: daily station positions from the Nevada Geodetic Laboratory (IGS20 frame).
@@ -525,6 +530,7 @@ meta = {"id": SITE, "name": cfg["name"], "bbox": [W, S, E, N], "nx": nx, "ny": n
                            "deramp": bool(cfg.get("deramp")), "pairs": len(v["pairs"])} for k, v in stacks.items()},
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "los": {k: dict(zip("enu", [round(float(v), 3) for v in s["enu"]])) for k, s in stacks.items()},
+        "wavelength_cm": {"nisar": round(float(next(iter(stacks.values()))["lam_cm"]), 2), "s1": 5.55},   # Sentinel-1: 5.405 GHz
         "layers": []}
 if RUN_S1:
     meta["los_s1"] = {k: dict(zip("enu", [round(float(v), 3) for v in s["enu"]])) for k, s in s1.items() if s["enu"]}

@@ -8,6 +8,46 @@ const POS = [59, 130, 214], NEG = [217, 83, 74], MID = [120, 120, 116];
 const C = { nisar: "#3987e5", s1: "#d95926", gps: "#c3c2b7", asc: "#199e70", desc: "#9085e9" };
 const NAME = { nisar: "NISAR (L-band)", s1: "Sentinel-1 (C-band)", gps: "GPS", asc: "Ascending passes", desc: "Descending passes" };
 const IMPACT = [213, 81, 129];
+// Colour ramps: each side keeps one hue and deepens with size, so big changes read as darker, not just "more red".
+const RAMP = {
+  neg: [[0, [242, 196, 176]], [0.45, [226, 85, 63]], [1, [122, 22, 28]]],
+  pos: [[0, [190, 214, 246]], [0.45, [57, 135, 229]], [1, [18, 58, 118]]],
+  impact: [[0, [246, 200, 216]], [0.5, [213, 81, 129]], [1, [110, 24, 66]]],
+  coh: [[0, [20, 24, 32]], [1, [150, 200, 255]]],
+};
+const ramp = (stops, v) => { for (let k = 1; k < stops.length; k++) if (v <= stops[k][0]) { const [a, ca] = stops[k - 1], [b, cb] = stops[k]; return mix(ca, cb, (v - a) / (b - a)); } return stops[stops.length - 1][1]; };
+const css = (stops) => stops.map(([t, c]) => `rgb(${c}) ${Math.round(t * 100)}%`).join(", ");
+const niceStep = (x) => { const p = Math.pow(10, Math.floor(Math.log10(x))), m = x / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; };
+// Draw a value grid (NaN = no reading) onto a canvas at S times the resolution, blending between pixel centres.
+function drawField(c, vals, nx, ny, color, contour) {
+  const S = nx * ny > 90000 ? 2 : 3, W = nx * S, H = ny * S;
+  c.width = W; c.height = H;
+  const g = c.getContext("2d"), img = g.createImageData(W, H), out = img.data, up = new Float32Array(W * H);
+  for (let Y = 0; Y < H; Y++) {
+    const fy = (Y + 0.5) / S - 0.5, j0 = Math.floor(fy), wy = fy - j0;
+    for (let X = 0; X < W; X++) {
+      const fx = (X + 0.5) / S - 0.5, i0 = Math.floor(fx), wx = fx - i0;
+      let sum = 0, wsum = 0;
+      for (let dj = 0; dj < 2; dj++) for (let di = 0; di < 2; di++) {
+        const i = i0 + di, j = j0 + dj; if (i < 0 || j < 0 || i >= nx || j >= ny) continue;
+        const v = vals[j * nx + i]; if (v !== v) continue;
+        const w = (di ? wx : 1 - wx) * (dj ? wy : 1 - wy); sum += v * w; wsum += w;
+      }
+      up[Y * W + X] = wsum >= 0.5 ? sum / wsum : NaN;
+    }
+  }
+  for (let q = 0; q < W * H; q++) {
+    const v = up[q]; if (v !== v) continue;
+    let [r, gg, b, a] = color(v);
+    if (contour && a > 0) {            // darken where the value crosses a contour level
+      const band = Math.floor(v / contour), X = q % W;
+      const vr = X + 1 < W ? up[q + 1] : NaN, vd = q + W < W * H ? up[q + W] : NaN;
+      if ((vr === vr && Math.floor(vr / contour) !== band) || (vd === vd && Math.floor(vd / contour) !== band)) { r *= 0.68; gg *= 0.68; b *= 0.68; a = Math.min(255, a + 25); }
+    }
+    out[q * 4] = r; out[q * 4 + 1] = gg; out[q * 4 + 2] = b; out[q * 4 + 3] = a;
+  }
+  g.putImageData(img, 0, 0);
+}
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 const fmtDate = (s) => (s ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : "");
 const toDay = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)) / 864e5;
@@ -186,37 +226,32 @@ export default function Page() {
     v.sort((a, b) => a - b);
     return Math.max(v[Math.floor(v.length * 0.98)] || 0.5, 0.5);
   }, [layer, grid, speed, meta]);
+  const contourStep = niceStep(lim / 4);
+  const unit = speed ? "cm/month" : "cm";
 
   useEffect(() => {
     if (!meta || !grid || !layer || !map.current || !ready || grid._key !== layer.key) return;
-    const { nx, ny } = meta, c = canvas.current;
-    c.width = nx; c.height = ny;
-    const g2 = c.getContext("2d"), img = g2.createImageData(nx, ny), off = layer.static ? 0 : t * nx * ny;
-    if (off + nx * ny > grid.length) return;
-    for (let p = 0; p < nx * ny; p++) {
-      let rgb, a = 215;
-      if (layer.static && layer.palette === "impact") {
-        if (grid[p] === layer.nodata) { a = 0; rgb = MID; } else { const v = grid[p] / layer.max; rgb = IMPACT; a = Math.min(235, 255 * Math.max(0, v - 0.08) * 1.6); }
-      } else if (layer.static) rgb = mix([20, 24, 32], [150, 200, 255], grid[p] / 255);
-      else {
-        const val = valueAt(grid, layer, t, p);
-        if (val === null) { a = 0; rgb = MID; }
-        else { const v = Math.max(-1, Math.min(1, val / lim)); rgb = v >= 0 ? mix(MID, POS, v) : mix(MID, NEG, -v); a = 30 + 200 * Math.min(1, Math.abs(v) * 2.5); }
-      }
-      img.data.set([rgb[0], rgb[1], rgb[2], a], p * 4);
-    }
-    g2.putImageData(img, 0, 0);
+    const { nx, ny } = meta, c = canvas.current, N = nx * ny;
+    if (!layer.static && (t + 1) * N > grid.length) return;
+    const vals = new Float32Array(N);
+    if (layer.static) for (let p = 0; p < N; p++) vals[p] = layer.palette === "impact" ? (grid[p] === layer.nodata ? NaN : grid[p] / layer.max) : grid[p] / 255;
+    else for (let p = 0; p < N; p++) { const v = valueAt(grid, layer, t, p); vals[p] = v === null ? NaN : v / lim; }
+    const color = layer.static
+      ? (layer.palette === "impact" ? (v) => [...ramp(RAMP.impact, v), Math.min(235, 255 * Math.max(0, v - 0.06) * 1.7)] : (v) => [...ramp(RAMP.coh, v), 215])
+      : (v) => { const m = Math.min(1, Math.abs(v)); return [...ramp(v < 0 ? RAMP.neg : RAMP.pos, m), Math.min(232, 255 * Math.max(0, m - 0.1) * 2.3)]; };
+    drawField(c, vals, nx, ny, color, layer.static ? 0 : contourStep / lim);
     // A canvas source repaints straight from the canvas: no image decode, no aborted loads while scrubbing.
     const [w, s, e, n] = meta.bbox, coords = [[w, n], [e, n], [e, s], [w, s]], m = map.current;
     let src = m.getSource("sar");
-    if (src && src._site !== meta.id) { m.removeLayer("sar"); m.removeSource("sar"); src = null; }
+    if (src && src._site !== meta.id) { m.removeLayer("sar"); m.removeSource("sar"); src = null; }      // canvas size changes with the site
     if (!src) {
       m.addSource("sar", { type: "canvas", canvas: c, coordinates: coords, animate: false });
-      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": "nearest", "raster-fade-duration": 0 } }, m.getLayer("boxes") ? "boxes" : top.current);
+      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": "linear", "raster-fade-duration": 0 } }, m.getLayer("boxes") ? "boxes" : top.current);
       src = m.getSource("sar"); src._site = meta.id;
     }
     src.play(); src.pause(); m.triggerRepaint();
   }, [meta, grid, t, layerKey, ready, mode, lim]);
+  const colorCss = (v) => { const m = Math.min(1, Math.abs(v)); return `rgb(${ramp(v < 0 ? RAMP.neg : RAMP.pos, m)})`; };
 
   useEffect(() => {
     if (!ready || !map.current) return;
@@ -336,23 +371,23 @@ export default function Page() {
     const main = meta.default_layer && meta.layers.find((l) => l.key === meta.default_layer) ? meta.default_layer : "up";
     const cm = (v) => `${Math.abs(v).toFixed(1)} cm`, lo = (o) => (o && Object.values(o).length ? Math.min(...Object.values(o)) : null);
     if (meta.event) return [
-      { icon: "🌀", title: "Before and after the storm", layer: main, point: "box", label: "Coast around Destin",
+      { title: "Before and after the storm", layer: main, point: "box", label: "Coast around Destin",
         say: () => `Pink marks ground that looked different to the radar after ${meta.event.name} than in the calm weeks before it.` },
-      { icon: "🎯", title: "The most changed spot", layer: main, pick: "hot", point: "hot", label: "Most changed", glow: "pickcard",
+      { title: "The most changed spot", layer: main, pick: "hot", point: "hot", label: "Most changed", glow: "pickcard",
         say: (d) => d.hot ? `Here the radar lost ${Math.round(100 * d.hot.v)}% of its usual signal. In the chart, the lines stay level through the calm passes, then drop at the yellow storm line.` : "Finding the most changed spot…" },
-      { icon: "🌧️", title: "Line it up with the weather", layer: main, pick: "hot", point: "hot", label: "Same spot", glow: "weather",
+      { title: "Line it up with the weather", layer: main, pick: "hot", point: "hot", label: "Same spot", glow: "weather",
         say: (d) => `The rain and wind charts carry the same yellow line. ${d.share !== null ? `Across the yellow box, ${Math.round(100 * d.share)}% of the ground changed by more than 30%. ` : ""}Pink means changed, not destroyed: tides and wet soil count too.` },
     ];
     return [
-      { icon: "▶️", title: "Watch it move", layer: "up", mode: "total", play: true, point: "timebar", label: "One step = 12 days",
+      { title: "Watch it move", layer: "up", mode: "total", play: true, point: "timebar", label: "One step = 12 days",
         say: () => `${meta.story} Red is sinking, blue is rising.` },
-      { icon: "🎯", title: "The fastest spot", layer: "up", mode: "total", pick: "hot", point: "hot", label: "Moved the most", glow: "pickcard",
+      { title: "The fastest spot", layer: "up", mode: "total", pick: "hot", point: "hot", label: "Moved the most", glow: "pickcard",
         say: (d) => d.hot ? `This spot went ${d.hot.v < 0 ? "down" : "up"} ${cm(d.hot.v)} between ${fmtDate(d.layer.dates[0])} and ${fmtDate(d.layer.dates[d.layer.dates.length - 1])}. Each dot on the chart is one satellite pass.` : "Finding the fastest spot…" },
-      { icon: "🌧️", title: "Rain, then speed", layer: "up", mode: "speed", pick: "hot", point: "hot", label: "Same spot, now speed", glow: "weather",
+      { title: "Rain, then speed", layer: "up", mode: "speed", pick: "hot", point: "hot", label: "Same spot, now speed", glow: "weather",
         say: () => "Now the chart shows speed in cm per month. Compare its peaks with the rainfall bars below it." },
-      ...(hasS1 ? [{ icon: "📡", title: "Old radar, new radar", layer: "s1_up", mode: "total", point: "box", label: "Blank = lost track", glow: "coverage",
+      ...(hasS1 ? [{ title: "Old radar, new radar", layer: "s1_up", mode: "total", point: "box", label: "Blank = lost track", glow: "coverage",
         say: (d) => { const a = lo(d.cov?.nisar), c = lo(d.cov?.s1); return `This is Sentinel-1, whose 5.5 cm wavelength is a quarter of NISAR's.${a !== null && c !== null ? ` In the yellow box it kept a reading on ${Math.round(100 * c)}% of the ground; NISAR kept ${Math.round(100 * a)}%.` : ""}`; } }] : []),
-      ...(st ? [{ icon: "✅", title: "Checked on the ground", layer: "up", mode: "total", station: st, point: "station", label: `GPS ${st.id}`, glow: "pickcard", notes: true,
+      ...(st ? [{ title: "Checked on the ground", layer: "up", mode: "total", station: st, point: "station", label: `GPS ${st.id}`, glow: "pickcard", notes: true,
         say: (d) => `A fixed GPS antenna measured the same ground.${d.stat ? ` Radar and GPS differ by ${d.stat.rms.toFixed(2)} cm on average here.` : ""} One limit to know: north-south motion is mostly invisible to this radar.` }] : []),
     ];
   }, [meta, ctx]);
@@ -413,9 +448,70 @@ export default function Page() {
   }, [tour, steps.length]);
   useEffect(() => { setTour(null); }, [siteId]);
 
+  // Slice: a straight cut through the selected spot, showing terrain height and the measured change along it.
+  const [sliceDir, setSliceDir] = useState("ns");
+  const [slice, setSlice] = useState(null);
+  const sliceOk = pick && grid && layer && grid._key === layer.key && (!layer.static || layer.palette === "impact");
+  useEffect(() => {
+    setSlice(null);
+    if (!sliceOk || !meta) return;
+    let live = true;
+    const [w, s, e, n] = meta.bbox, K = 140, pts = [];
+    for (let k = 0; k < K; k++) { const f = k / (K - 1); pts.push(sliceDir === "ns" ? { lon: pick.lon, lat: n - f * (n - s) } : { lon: w + f * (e - w), lat: pick.lat }); }
+    const kmPer = sliceDir === "ns" ? (n - s) * 110.54 : (e - w) * 111.32 * Math.cos((pick.lat * Math.PI) / 180);
+    elevations(pts).then((h) => {
+      if (!live) return;
+      const rows = pts.map((q, k) => { const px = toPixel(q.lon, q.lat); let v = null;
+        if (px) { const idx = px.j * meta.nx + px.i; v = layer.static ? (grid[idx] === layer.nodata ? null : grid[idx] / layer.max) : valueAt(grid, layer, t, idx); }
+        return { km: (k / (K - 1)) * kmPer, h: h[k], v }; });
+      const at = sliceDir === "ns" ? ((n - pick.lat) / (n - s)) * kmPer : ((pick.lon - w) / (e - w)) * kmPer;
+      setSlice({ rows, at, ends: sliceDir === "ns" ? ["North", "South"] : ["West", "East"] });
+    }).catch(() => live && setSlice({ error: true }));
+    return () => { live = false; };
+  }, [sliceOk, pick?.i, pick?.j, sliceDir, layerKey, t, mode, meta]);
+  useEffect(() => {          // show the cut on the map
+    const m = map.current; if (!m || !ready || !meta) return;
+    const [w, s, e, n] = meta.bbox;
+    const data = { type: "FeatureCollection", features: sliceOk ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: sliceDir === "ns" ? [[pick.lon, n], [pick.lon, s]] : [[w, pick.lat], [e, pick.lat]] } }] : [] };
+    if (m.getSource("slice")) m.getSource("slice").setData(data);
+    else { m.addSource("slice", { type: "geojson", data });
+      m.addLayer({ id: "slice-c", type: "line", source: "slice", paint: { "line-color": "#0b0d10", "line-width": 4, "line-opacity": 0.7 } }, top.current);
+      m.addLayer({ id: "slice", type: "line", source: "slice", paint: { "line-color": "#f0efec", "line-width": 1.6 } }, top.current); }
+  }, [sliceOk, pick?.i, pick?.j, sliceDir, ready, meta]);
+
+  // Soft value labels on the map: walk outward from the biggest change in three directions and
+  // drop a number wherever the surface crosses one of the contour levels.
+  const valMarks = useRef([]);
+  useEffect(() => {
+    valMarks.current.forEach((k) => k.remove()); valMarks.current = [];
+    const m = map.current;
+    if (!m || !ready || !meta || !grid || !layer || layer.static || grid._key !== layer.key || !hot) return;
+    const [w, s, e, n] = meta.bbox, { nx, ny } = meta, out = [];
+    const put = (i, j, text, peak) => { const el = document.createElement("div"); el.className = "vlabel" + (peak ? " peak" : ""); el.textContent = text;
+      valMarks.current.push(new maplibregl.Marker({ element: el }).setLngLat([w + ((i + 0.5) / nx) * (e - w), n - ((j + 0.5) / ny) * (n - s)]).addTo(m)); };
+    const fmt = (v) => `${v > 0 ? "+" : "−"}${Math.abs(v) >= 10 || Number.isInteger(Math.abs(v)) ? Math.abs(v).toFixed(0) : Math.abs(v).toFixed(1)}`;
+    for (const ang of [20, 140, 260]) {
+      const dx = Math.cos((ang * Math.PI) / 180), dy = Math.sin((ang * Math.PI) / 180);
+      let prev = null, last = -99, placed = 0;
+      for (let r = 2; r < Math.max(nx, ny) && placed < 3; r++) {
+        const i = Math.round(hot.i + dx * r), j = Math.round(hot.j + dy * r); if (i < 0 || j < 0 || i >= nx || j >= ny) break;
+        const v = valueAt(grid, layer, t, j * nx + i); if (v === null) { prev = null; continue; }
+        const band = Math.floor(v / contourStep);
+        if (prev !== null && band !== prev && r - last >= Math.max(6, Math.min(nx, ny) / 14)) {
+          const level = Math.max(band, prev) * contourStep;
+          if (Math.abs(level) > 1e-9) { out.push([i, j, fmt(level)]); last = r; placed++; }
+        }
+        prev = band;
+      }
+    }
+    out.forEach(([i, j, text]) => put(i, j, text, false));
+    const pk = valueAt(grid, layer, t, hot.j * nx + hot.i);
+    if (pk !== null && Math.abs(pk) >= contourStep / 2 && !(pick && pick.i === hot.i && pick.j === hot.j)) put(hot.i, hot.j, `${fmt(pk)} ${unit}`, true);
+  }, [ready, meta, grid, layerKey, t, mode, hot?.i, hot?.j, contourStep, pick?.i, pick?.j]);
+
   const cov = ctx?.coverage;
   const SENSORS = [["nisar", "NISAR", "L-band"], ["s1", "Sentinel-1", "C-band"]];
-  const KINDS = [["impact", "Storm change", "🌀"], ["up", "Vertical", "↕️"], ["east", "East-west", "↔️"], ["asc_los", "Ascending view", "↗️"], ["desc_los", "Descending view", "↘️"], ["coh", "Signal quality", "📶"]];
+  const KINDS = [["impact", "Storm change"], ["up", "Vertical"], ["east", "East-west"], ["asc_los", "Ascending view"], ["desc_los", "Descending view"], ["coh", "Signal quality"]];
   const ENDS = { up: ["down", "up"], east: ["west", "east"], asc_los: ["away from satellite", "toward satellite"], desc_los: ["away from satellite", "toward satellite"] };
   const sensor = layer?.sensor || "nisar";
   const has = (sn, kd) => meta?.layers.find((l) => (l.sensor || "nisar") === sn && l.kind === kd);
@@ -427,7 +523,6 @@ export default function Page() {
   const ends = layer && ENDS[layer.kind];
   const cur = chart && chart.lines[0].pts.find((p) => p.d === layer.dates[t]);
   const SENS = SENSORS.filter(([k]) => meta?.layers.some((l) => (l.sensor || "nisar") === k));
-  const unit = speed ? "cm/month" : "cm";
   const fmtCm = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)} ${unit}`;
 
   return (
@@ -435,8 +530,8 @@ export default function Page() {
       <div className="map">
         <div ref={mapDiv} />
         <div className="basesw" role="group" aria-label="Background">
-          <button className={base === "dark" ? "on" : ""} aria-pressed={base === "dark"} onClick={() => setBase("dark")}><span aria-hidden="true">🗺️</span> Map</button>
-          <button className={base === "sat" ? "on" : ""} aria-pressed={base === "sat"} onClick={() => setBase("sat")}><span aria-hidden="true">🛰️</span> Satellite</button>
+          <button className={base === "dark" ? "on" : ""} aria-pressed={base === "dark"} onClick={() => setBase("dark")}>Map</button>
+          <button className={base === "sat" ? "on" : ""} aria-pressed={base === "sat"} onClick={() => setBase("sat")}>Satellite</button>
         </div>
         {meta && layer && (
           <div className="timebar">
@@ -449,11 +544,11 @@ export default function Page() {
                 <div className="tdate"><span className="muted">{speed ? "speed around" : `since ${fmtDate(layer.dates[0])}`}</span><b>{fmtDate(layer.dates[t])}</b></div>
                 <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
               </div>
-              <div className="ramp" style={{ background: `linear-gradient(90deg, rgb(${NEG}), rgb(${MID}), rgb(${POS}))` }} />
-              <div className="row"><span>−{lim.toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span className="blank">see-through = no reading</span><span>+{lim.toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
+              <div className="ramp" style={{ background: `linear-gradient(90deg, ${css([...RAMP.neg].reverse().map(([t, c]) => [(1 - t) / 2, c]))}, rgba(120,120,116,0.25) 50%, ${css(RAMP.pos.map(([t, c]) => [0.5 + t / 2, c]))})` }} />
+              <div className="row"><span>−{lim.toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span className="blank">lines every {contourStep} {unit} · see-through = no reading</span><span>+{lim.toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
             </>) : isImpact ? (<>
               <div className="trow one"><div className="tdate"><span className="muted">before and after</span><b>{meta.event?.name || "Event"}</b></div></div>
-              <div className="ramp" style={{ background: `linear-gradient(90deg, rgba(${IMPACT},0.05), rgb(${IMPACT}))` }} />
+              <div className="ramp" style={{ background: `linear-gradient(90deg, rgba(246,200,216,0.08), ${css(RAMP.impact)})` }} />
               <div className="row"><span>surface unchanged</span><span className="blank">see-through = no reading</span><span>surface changed a lot</span></div>
             </>) : (<>
               <div className="ramp" style={{ background: "linear-gradient(90deg, rgb(20,24,32), rgb(150,200,255))" }} />
@@ -464,12 +559,12 @@ export default function Page() {
       </div>
       <aside className={"panel" + (step ? " touring" : "")}>
         <header>
-          <h1><span className="logo" aria-hidden="true">🛰️</span> <span className="brand">SARvis</span></h1>
+          <h1><span className="mark" aria-hidden="true" /><span className="brand">SARvis</span></h1>
           <p className="sub">Watching the ground move from space, every 12 days.</p>
           {meta && layer && (
             <div className="actions hide-on-tour">
-              <button className="cta" onClick={() => setTour({ i: 0, auto: false })}><span aria-hidden="true">🎬</span> Take the tour</button>
-              <button className="ghost" onClick={copyLink}><span aria-hidden="true">🔗</span> {copied ? "Link copied" : "Copy link to this view"}</button>
+              <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Take the tour</button>
+              <button className="ghost" onClick={copyLink}>{copied ? "Link copied" : "Copy link to this view"}</button>
             </div>
           )}
         </header>
@@ -480,25 +575,24 @@ export default function Page() {
               <label className="auto"><input type="checkbox" checked={tour.auto} onChange={(e) => setTour({ ...tour, auto: e.target.checked })} /> Auto-advance</label>
             </div>
             <div className="tourbody" key={tour.i}>
-              <h3><span className="ticon" aria-hidden="true">{step.icon}</span>{step.title}</h3>
+              <h3><span className="ticon" aria-hidden="true">{tour.i + 1}</span>{step.title}</h3>
               <p>{step.say({ hot, layer, cov, share: hot?.share ?? null, stat: chart?.stat })}</p>
-              {step.glow && <div className="cue"><span aria-hidden="true">👇</span> {step.glow === "weather" ? "See the weather charts" : step.glow === "coverage" ? "See the coverage numbers" : "See the chart"} {typeof window !== "undefined" && window.innerWidth <= 800 ? "below" : "highlighted below"}</div>}
+              {step.glow && <div className="cue">{step.glow === "weather" ? "See the weather charts" : step.glow === "coverage" ? "See the coverage numbers" : "See the chart"} {typeof window !== "undefined" && window.innerWidth <= 800 ? "below" : "highlighted below"}</div>}
             </div>
             {tour.auto && <div className="tourbar" key={`b${tour.i}`}><i /></div>}
             <div className="tourbtns">
               <button className="ghost" disabled={tour.i === 0} onClick={() => setTour({ ...tour, i: tour.i - 1 })}>Back</button>
-              {tour.i < steps.length - 1 ? <button className="cta" onClick={() => setTour({ ...tour, i: tour.i + 1 })}>Next <span aria-hidden="true">→</span></button> : <button className="cta" onClick={() => setTour(null)}>Finish <span aria-hidden="true">✓</span></button>}
+              {tour.i < steps.length - 1 ? <button className="cta" onClick={() => setTour({ ...tour, i: tour.i + 1 })}>Next </button> : <button className="cta" onClick={() => setTour(null)}>Finish </button>}
               <button className="ghost" onClick={() => setTour(null)}>Exit</button>
             </div>
           </div>
         )}
         {meta?.synthetic && <div className="banner"><b>Demo data.</b> Radar motion is synthetic. Rainfall and GPS are real.</div>}
         <div className="seg hide-on-tour" role="tablist" aria-label="Site">
-          {sites.map((st) => <button key={st.id} role="tab" aria-selected={st.id === siteId} className={"tab" + (st.id === siteId ? " on" : "")} onClick={() => setSiteId(st.id)}><span className="em" aria-hidden="true">{st.emoji}</span>{st.short || st.id}</button>)}
+          {sites.map((st) => <button key={st.id} role="tab" aria-selected={st.id === siteId} className={"tab" + (st.id === siteId ? " on" : "")} onClick={() => setSiteId(st.id)}>{st.short || st.id}</button>)}
         </div>
         {meta && (
           <div className="story hide-on-tour" key={meta.id}>
-            <div className="em" aria-hidden="true">{meta.emoji}</div>
             <div><b>{meta.name}</b><p>{meta.story}</p>{meta.event && <p className="muted">{meta.event.name}, {meta.event.when}. {meta.event.note}</p>}</div>
           </div>
         )}
@@ -513,12 +607,11 @@ export default function Page() {
           <div className="hide-on-tour">
             <label>Measurement</label>
             <div className="chips">
-              {KINDS.filter(([k]) => has(sensor, k)).map(([k, name, icon]) => <button key={k} className={layer.kind === k ? "on" : ""} aria-pressed={layer.kind === k} onClick={() => choose(sensor, k)}><span aria-hidden="true">{icon}</span> {name}</button>)}
+              {KINDS.filter(([k]) => has(sensor, k)).map(([k, name]) => <button key={k} className={layer.kind === k ? "on" : ""} aria-pressed={layer.kind === k} onClick={() => choose(sensor, k)}>{name}</button>)}
             </div>
           </div>
           {hot && (
             <button className="finding hide-on-tour" onClick={() => setPick({ i: hot.i, j: hot.j, lon: hot.lon, lat: hot.lat })}>
-              <span className="em" aria-hidden="true">{isImpact ? "🔎" : "⚡"}</span>
               <span>{isImpact
                 ? <><b>{Math.round(100 * hot.share)}%</b> of the focus area lost more than 30% of its usual radar signal across the storm. Strongest spot: <b>{Math.round(100 * hot.v)}%</b>.</>
                 : <>Biggest change in the focus area: <b>{`${hot.v > 0 ? "+" : "−"}${Math.abs(hot.v).toFixed(1)} cm`}</b>{ends ? ` ${hot.v >= 0 ? ends[1] : ends[0]}` : ""} since {fmtDate(layer.dates[0])}.</>}
@@ -527,12 +620,12 @@ export default function Page() {
           )}
           {!layer.static && (
             <div className="seg hide-on-tour" aria-label="Show">
-              <button className={!speed ? "on" : ""} aria-pressed={!speed} onClick={() => setMode("total")}><span aria-hidden="true">📏</span> Total change</button>
-              <button className={speed ? "on" : ""} aria-pressed={speed} onClick={() => setMode("speed")}><span aria-hidden="true">⏱️</span> Speed</button>
+              <button className={!speed ? "on" : ""} aria-pressed={!speed} onClick={() => setMode("total")}>Total change</button>
+              <button className={speed ? "on" : ""} aria-pressed={speed} onClick={() => setMode("speed")}>Speed</button>
             </div>
           )}
           <div className="card" id="pickcard" ref={cardRef}>
-            <h2><span aria-hidden="true">📍</span> {pick ? (pick.station ? `Ground check at station ${pick.station}` : `Spot at ${pick.lat.toFixed(4)}, ${pick.lon.toFixed(4)}`) : "Pick a spot"}</h2>
+            <h2>{pick ? (pick.station ? `Ground check at station ${pick.station}` : `Spot at ${pick.lat.toFixed(4)}, ${pick.lon.toFixed(4)}`) : "Pick a spot"}</h2>
             <p className="muted" style={{ margin: "0 0 8px" }}>{layer.static ? (pick ? "Radar signal quality for each pair of passes (1 = surface unchanged, 0 = changed completely)." : "Tap the map to see how the radar signal held up at that spot.") : pick ? `${kindName} ${speed ? "speed, cm per month" : "motion, cm"}` : "Tap the map, or a labelled GPS station, to see how that spot moved."}</p>
             {isImpact && pickVal !== null && <div className="hero" key={`${pick.i}-${pick.j}`}>{pickVal === layer.nodata ? "No reading" : `${Math.round((100 * pickVal) / layer.max)}%`}<small> {pickVal === layer.nodata ? "here (water, or never a stable signal)" : "of the usual signal lost across the storm"}</small></div>}
             {sigChart && <Chart key={`s${pick.i}-${pick.j}`} lines={sigChart.lines} markX={null} eventX={eventX} eventLabel={meta.event?.name} domain={[0, 1]} unit="" />}
@@ -540,9 +633,21 @@ export default function Page() {
             {chart && <Chart key={`m${pick.i}-${pick.j}-${layerKey}-${mode}`} lines={chart.lines} markX={toDay(layer.dates[t])} eventX={eventX} eventLabel={meta.event?.name} />}
             {chart?.stat && <p className="muted" style={{ margin: "8px 0 0" }}>Radar minus GPS, root-mean-square: <b style={{ color: "var(--ink)" }}>{chart.stat.rms.toFixed(2)} cm</b> over {chart.stat.n} dates{ctx.gnss.ref ? ` (GPS relative to station ${ctx.gnss.ref})` : " (GPS not referenced; compare vertical only)"}.</p>}
           </div>
+          {sliceOk && (
+            <div className="card" id="slice">
+              <h2>Slice through this spot</h2>
+              <p className="muted" style={{ margin: "0 0 8px" }}>Ground height along the white line on the map, with the surface coloured by the change measured there. The radar sees the surface only; nothing below it is measured.</p>
+              <div className="seg" style={{ marginBottom: 10 }}>
+                <button className={sliceDir === "ns" ? "on" : ""} aria-pressed={sliceDir === "ns"} onClick={() => setSliceDir("ns")}>North to south</button>
+                <button className={sliceDir === "we" ? "on" : ""} aria-pressed={sliceDir === "we"} onClick={() => setSliceDir("we")}>West to east</button>
+              </div>
+              {!slice ? <p className="muted">Loading terrain…</p> : slice.error ? <p className="muted">Terrain heights could not be loaded.</p>
+                : <SliceChart slice={slice} color={layer.static ? (v) => `rgb(${ramp(RAMP.impact, v)})` : (v) => colorCss(v / lim)} unit={layer.static ? "" : unit} isShare={!!layer.static} />}
+            </div>
+          )}
           {rain && rain.pts.length > 0 && (
             <div className="card" id="weather">
-              <h2><span aria-hidden="true">🌧️</span> Daily rainfall, mm</h2>
+              <h2>Daily rainfall, mm</h2>
               <p className="muted" style={{ margin: "0 0 8px" }}>Regional estimate at the site centre.</p>
               <Bars pts={rain.pts} x0={rain.x0} x1={rain.x1} markX={layer.static ? null : toDay(layer.dates[t])} eventX={eventX} />
               <p className="muted" style={{ margin: "6px 0 0" }}>{ctx.rain.source}</p>
@@ -550,7 +655,7 @@ export default function Page() {
           )}
           {wind && wind.pts.length > 0 && (
             <div className="card">
-              <h2><span aria-hidden="true">💨</span> Strongest daily wind, m/s</h2>
+              <h2>Strongest daily wind, m/s</h2>
               <p className="muted" style={{ margin: "0 0 8px" }}>Regional model estimate at the site centre, 10 m above ground.{meta.event ? " A coarse model like this smooths out a hurricane's core, so it reads far below the peak winds reported at landfall." : ""}</p>
               {windNow && (
                 <div className="windnow">
@@ -567,7 +672,7 @@ export default function Page() {
           )}
           {wl && SENS.length > 1 && (
             <div className="card">
-              <h2><span aria-hidden="true">📡</span> Why the two radars can disagree</h2>
+              <h2>Why the two radars can disagree</h2>
               <p className="muted" style={{ margin: "0 0 10px" }}>A radar loses track when neighbouring pixels move apart by more than a quarter of its wavelength between two passes.</p>
               <div className="tiles">
                 {SENS.map(([k, name, band]) => (
@@ -582,7 +687,7 @@ export default function Page() {
           )}
           {cov && !meta.event && (
             <div className="card" id="coverage">
-              <h2><span aria-hidden="true">🎯</span> How much of the focus area each radar could measure</h2>
+              <h2>How much of the focus area each radar could measure</h2>
               <p className="muted" style={{ margin: "0 0 10px" }}>Share of pixels in the yellow box with a reading on every date.</p>
               <div className="tiles">
                 {SENS.map(([k, name, band]) => (
@@ -592,7 +697,7 @@ export default function Page() {
             </div>
           )}
           <details className="card" open={notesOpen} onToggle={(e) => setNotesOpen(e.currentTarget.open)}>
-            <summary><span aria-hidden="true">📖</span>&nbsp;How to read this</summary>
+            <summary>How to read this</summary>
             <ul className="notes">
               <li>Each pixel is about 80 m. Motion is relative to the white dashed reference area, which is assumed stable. The yellow dashed box is the focus area used for the coverage numbers.</li>
               <li>The radar sees motion toward or away from the satellite. Only about {Math.round(100 * Math.abs(meta.los?.asc?.n ?? 0.2))}% of north-south motion shows up, so vertical and east-west values absorb some of it.</li>
@@ -620,6 +725,52 @@ function useCount(target) {          // ease the headline number toward its new 
   }, [target]);
   return v;
 }
+// Terrain height from open elevation tiles (Mapzen "terrarium" encoding, hosted on AWS Open Data).
+const tileCache = {};
+async function elevations(pts, z = 12) {
+  const n = 2 ** z, need = {};
+  const loc = pts.map(({ lon, lat }) => { const x = ((lon + 180) / 360) * n, y = ((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n; const tx = Math.floor(x), ty = Math.floor(y); need[`${tx}/${ty}`] = [tx, ty]; return [tx, ty, Math.min(255, Math.floor((x - tx) * 256)), Math.min(255, Math.floor((y - ty) * 256))]; });
+  await Promise.all(Object.entries(need).map(async ([k, [tx, ty]]) => {
+    if (tileCache[k]) return;
+    const r = await fetch(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${tx}/${ty}.png`); if (!r.ok) throw new Error("terrain");
+    const bm = await createImageBitmap(await r.blob()), c = document.createElement("canvas"); c.width = c.height = 256;
+    const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(bm, 0, 0); tileCache[k] = g.getImageData(0, 0, 256, 256).data;
+  }));
+  return loc.map(([tx, ty, px, py]) => { const d = tileCache[`${tx}/${ty}`], o = (py * 256 + px) * 4; return d[o] * 256 + d[o + 1] + d[o + 2] / 256 - 32768; });
+}
+
+function SliceChart({ slice, color, unit, isShare }) {
+  const [hx, setHx] = useHover();
+  const { rows, at, ends } = slice, W = 330, H = 190, m = { l: 40, r: 10, t: 22, b: 26 };
+  const x1 = rows[rows.length - 1].km, hs = rows.map((r) => r.h);
+  let lo = Math.min(0, ...hs), hi = Math.max(...hs); if (hi - lo < 20) hi = lo + 20;
+  const base = lo - (hi - lo) * 0.35;                       // room below the surface for the ground fill
+  const sx = (k) => m.l + (k / x1) * (W - m.l - m.r), sy = (h) => m.t + ((hi - h) / (hi - base)) * (H - m.t - m.b);
+  const area = `M${sx(0)},${sy(base)} ` + rows.map((r) => `L${sx(r.km).toFixed(1)},${sy(r.h).toFixed(1)}`).join(" ") + ` L${sx(x1)},${sy(base)} Z`;
+  const h = hx !== null ? rows.reduce((a, r) => (Math.abs(r.km - hx) < Math.abs(a.km - hx) ? r : a)) : null;
+  const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); setHx(Math.max(0, Math.min(x1, ((((e.clientX - r.left) / r.width) * W - m.l) / (W - m.l - m.r)) * x1))); };
+  const exag = ((hi - base) / (H - m.t - m.b)) > 0 ? ((x1 * 1000) / (W - m.l - m.r)) / ((hi - base) / (H - m.t - m.b)) : 1;
+  const fmtV = (v) => (v === null ? "no reading" : isShare ? `${Math.round(v * 100)}% changed` : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)} ${unit}`);
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Terrain slice" onPointerDown={onMove} onPointerMove={onMove} onPointerLeave={() => setHx(null)} style={{ touchAction: "pan-y" }}>
+        <defs><linearGradient id="earth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#6b5a45" /><stop offset="1" stopColor="#2a241d" /></linearGradient></defs>
+        {lo < 0 || Math.min(...hs) <= 1 ? <rect x={m.l} y={sy(0)} width={W - m.l - m.r} height={sy(base) - sy(0)} fill="#16324a" /> : null}
+        <path d={area} fill="url(#earth)" />
+        {rows.slice(1).map((r, k) => <line key={k} x1={sx(rows[k].km)} y1={sy(rows[k].h)} x2={sx(r.km)} y2={sy(r.h)} stroke={r.v === null ? "#8a8985" : color(r.v)} strokeWidth={r.v === null ? 1.5 : 4.5} strokeLinecap="round" />)}
+        <line x1={sx(at)} x2={sx(at)} y1={m.t} y2={H - m.b} stroke="#f0efec" strokeDasharray="3 3" />
+        {[hi, lo].map((v) => <text key={v} x={m.l - 6} y={sy(v) + 4} textAnchor="end">{Math.round(v)}</text>)}
+        <text x={m.l - 6} y={m.t - 8} textAnchor="end">m</text>
+        <text x={m.l} y={H - 8}>{ends[0]}</text><text x={W - m.r} y={H - 8} textAnchor="end">{ends[1]}</text>
+        <text x={(W + m.l - m.r) / 2} y={H - 8} textAnchor="middle">{x1.toFixed(1)} km across</text>
+        {h && <g><line x1={sx(h.km)} x2={sx(h.km)} y1={m.t} y2={H - m.b} stroke="#f0efec" /><circle cx={sx(h.km)} cy={sy(h.h)} r="4.5" fill={h.v === null ? "#8a8985" : color(h.v)} stroke="#242423" strokeWidth="2" />
+          <text x={m.l} y={12} style={{ fill: "#f0efec", fontSize: 11 }}>{h.km.toFixed(1)} km: {Math.round(h.h)} m high, {fmtV(h.v)}</text></g>}
+      </svg>
+      <p className="muted" style={{ margin: "6px 0 0" }}>Heights are stretched about {exag >= 10 ? Math.round(exag) : exag.toFixed(1)} times so the slope is visible. Elevation: Mapzen terrain tiles on AWS Open Data.</p>
+    </div>
+  );
+}
+
 function useHover() { const [h, setH] = useState(null); return [h, setH]; }
 
 function Chart({ lines, markX, eventX = null, eventLabel = "", domain = null, unit = "" }) {

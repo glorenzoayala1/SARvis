@@ -6,6 +6,14 @@ import maplibregl from "maplibre-gl";
 const POS = [59, 130, 214], NEG = [217, 83, 74], MID = [120, 120, 116];
 // Chart series colours (fixed by entity): NISAR blue, Sentinel-1 orange, GPS light grey.
 const C = { nisar: "#3987e5", s1: "#d95926", gps: "#c3c2b7", asc: "#199e70", desc: "#9085e9" };
+// One colour per radar band, checked for colour-blind separation on the dark panel. L and C keep the colours NISAR and Sentinel-1 use everywhere else.
+const BANDS = [
+  { key: "P", cm: 69.7, approx: true, color: "#d55181", who: "UAVSAR aircraft radar", note: "420 to 440 MHz. NASA ABoVE flights over Alaska and western Canada, 2017. Used for forests and soil." },
+  { key: "L", cm: 24.2, color: C.nisar, who: "NISAR", note: "The main record here. Repeats every 12 days." },
+  { key: "C", cm: 5.55, color: C.s1, who: "Sentinel-1", note: "The comparison record, where it covers the site." },
+  { key: "X", cm: 3, approx: true, color: "#1ba3a3", who: "Sandia test radars", note: "8 to 12 GHz. Sample aircraft images at 4-inch detail; locations not published." },
+  { key: "Ka", cm: 1, approx: true, color: "#c98500", who: "Sandia test radars", note: "26.5 to 40 GHz. Sample aircraft images at 4-inch detail; locations not published." },
+];
 const NAME = { nisar: "NISAR (L-band)", s1: "Sentinel-1 (C-band)", gps: "GPS", asc: "Ascending passes", desc: "Descending passes" };
 const IMPACT = [213, 81, 129];
 // Colour ramps: each side keeps one hue and deepens with size, so big changes read as darker, not just "more red".
@@ -518,7 +526,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       else { m.addSource("bars", { type: "geojson", data: fc });
         m.addLayer({ id: "bars", type: "fill-extrusion", source: "bars", paint: { "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": true } }, top.current); } };
     if (!on) { push(); return; }
-    const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 2600)));
+    const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 800)));       // about 800 blocks at most, so the land stays visible between columns
     const widthM = (e - w) * 111320 * Math.cos((((s + n) / 2) * Math.PI) / 180), impactTop = widthM * 0.018 * { low: 0.5, medium: 1, high: 2 }[opt.tall];
     const dx = (e - w) / nx, dy = (n - s) / ny, cols = [];
     for (let j = 0; j < ny; j += B) for (let i = 0; i < nx; i += B) {
@@ -529,7 +537,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       }
       if (!cnt) continue;
       const v = sum / cnt, k = layer.static ? v : v / lim; if (Math.abs(k) < 0.15) continue;          // leave out near-zero noise
-      const cx = w + (i + B / 2) * dx, cy = n - (j + B / 2) * dy, hw = B * dx * 0.13, hh = B * dy * 0.13;   // thin: about a quarter of the block
+      const cx = w + (i + B / 2) * dx, cy = n - (j + B / 2) * dy, hw = B * dx * 0.06, hh = B * dy * 0.06;   // thin: about an eighth of the block
       cols.push({ lon: cx, lat: cy, hw, hh, h: layer.static ? Math.min(1, v) * impactTop : Math.abs(v) * mPerCm,
         c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, Math.abs(k)))})` });
     }
@@ -915,9 +923,22 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
                     <div className="big">{(wl[k] / 4).toFixed(1)} cm <small>largest step it can follow</small></div>
                   </div>))}
               </div>
-              <p className="muted" style={{ margin: "10px 0 0" }}>Shorter wavelengths (X-band, about 3 cm) see finer detail but lose fast motion sooner. Longer ones (P-band, 30 to 100 cm) are used for forests, not ground motion.</p>
             </div>
           )}
+          <div className="card" id="bands">
+            <h2>Radar bands, longest wavelength first</h2>
+            <p className="muted" style={{ margin: "0 0 10px" }}>Two of these are measured on this map. The other three are shown for scale only: their public data does not cover these sites.</p>
+            <div className="bands">
+              {BANDS.map((b) => { const cm = b.key === "L" ? (wl?.nisar ?? b.cm) : b.key === "C" ? (wl?.s1 ?? b.cm) : b.cm, on = b.key === "L" || (b.key === "C" && SENS.length > 1);
+                return (
+                  <div key={b.key} className="band">
+                    <div className="bandhead"><span className="swatch" style={{ background: b.color }} /><b>{b.key}-band</b><span className="muted">{b.who}</span><span className={`chip ${on ? "on" : ""}`}>{on ? "on this map" : "not on this map"}</span></div>
+                    <div className="meter"><i style={{ width: `max(3px, ${(100 * cm) / BANDS[0].cm}%)`, background: b.color }} /></div>
+                    <div className="bandfoot"><span className="num">{b.approx ? `about ${Math.round(cm)}` : cm.toFixed(1)} cm</span><span className="muted">{b.note}</span></div>
+                  </div>); })}
+            </div>
+            <p className="muted" style={{ margin: "10px 0 0" }}>Longer waves pass through plants and follow bigger ground movements. Shorter waves show finer detail but lose track of fast motion sooner. P, X and Ka wavelengths are worked out from each band's frequency range.</p>
+          </div>
           </div>
         )}
         {meta && layer && tab === "about" && (

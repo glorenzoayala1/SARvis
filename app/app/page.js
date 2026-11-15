@@ -1235,7 +1235,6 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         {meta && layer && tab === "found" && !step && (
           <div className="pane" id="found">
             {!found ? <p className="muted">Loading the findings.</p> : (<>
-              <p className="overall">{found.overall}</p>
               <div className="found">
                 {sites.filter((st) => found.sites[st.id]).map((st) => { const f = found.sites[st.id]; return (
                   <div key={st.id} className={"card finding" + (st.id === siteId ? " here" : "")}>

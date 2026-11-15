@@ -88,6 +88,7 @@ export default function Page() {
   const [tRaw, setT] = useState(0);
   const [pick, setPick] = useState(null);       // {i, j, lon, lat, station?}
   const [playing, setPlaying] = useState(false);
+  const [split, setSplit] = useState(false), [splitAt, setSplitAt] = useState(0.5);      // band split view: this sensor on the left, the other on the right
   const [fr, setFr] = useState(0);                 // how far playback is between the current date and the next, 0 to 1
   const [mode, setMode] = useState("total");    // "total" = change since first date, "speed" = cm per 30 days between dates
   const [ready, setReady] = useState(false);    // map style loaded (isStyleLoaded() flips false while tiles load, so track it ourselves)
@@ -281,7 +282,14 @@ export default function Page() {
     return ((b - a) * meta.scale * 30) / (toDay(l.dates[k1]) - toDay(l.dates[k1 - 1]));
   };
   // the value shown right now: during playback it is part-way between this date and the next
-  const vNow = (p) => { const a = valueAt(grid, layer, t, p); if (!fr || a === null || t >= layer.dates.length - 1) return a; const b = valueAt(grid, layer, t + 1, p); return b === null ? a : a + (b - a) * fr; };
+  // Band split: right of the divider the map shows the other radar's measurement of the same thing, counted from the same start date.
+  const BAND = { nisar: "NISAR · L-band", s1: "Sentinel-1 · C-band" };
+  const splitOn = split && !!otherLayer && !!other && other._key === otherLayer.key && !speed;
+  const nearIdx = (dates, d) => { let b = 0; for (let k = 0; k < dates.length; k++) if (Math.abs(toDay(dates[k]) - toDay(d)) < Math.abs(toDay(dates[b]) - toDay(d))) b = k; return b; };
+  const oK = splitOn ? nearIdx(otherLayer.dates, layer.dates[t]) : 0, oK0 = splitOn ? nearIdx(otherLayer.dates, layer.dates[0]) : 0;
+  const oLate = splitOn && Math.abs(toDay(otherLayer.dates[oK]) - toDay(layer.dates[t])) > 13;      // the other radar has no pass near this date
+  const vOther = (p) => { if (oLate) return null; const N = meta.nx * meta.ny, a = other[oK0 * N + p], b = other[oK * N + p]; return a === meta.nodata || b === meta.nodata ? null : (b - a) * meta.scale; };
+  const vNow = (p) => { if (splitOn && (p % meta.nx) >= splitAt * meta.nx) return vOther(p); const a = valueAt(grid, layer, t, p); if (!fr || a === null || t >= layer.dates.length - 1) return a; const b = valueAt(grid, layer, t + 1, p); return b === null ? a : a + (b - a) * fr; };
   const lim = useMemo(() => {
     if (!layer || layer.static) return 1;
     if (!speed || !grid || grid._key !== layer.key) return Math.max(layer.p98, 0.5);
@@ -316,7 +324,7 @@ export default function Page() {
       src = m.getSource("sar"); src._site = meta.id;
     }
     src.play(); src.pause(); m.triggerRepaint();
-  }, [meta, grid, t, fr, layerKey, ready, mode, lim, opt.contours, opt.smooth, opt.view3d, opt.strength]);
+  }, [other, splitOn, splitAt, meta, grid, t, fr, layerKey, ready, mode, lim, opt.contours, opt.smooth, opt.view3d, opt.strength]);
   const colorCss = (v) => { const m = Math.min(1, Math.abs(v)); return `rgb(${ramp(v < 0 ? RAMP.neg : RAMP.pos, m)})`; };
 
   useEffect(() => {
@@ -607,7 +615,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       q.t = layer.static ? `${x}%` : `${x > 0 ? "+" : "−"}${Math.abs(x) >= 10 ? Math.abs(x).toFixed(0) : Math.abs(x).toFixed(1)} ${un}`; });
     colsRef.current = cols; if (!fr) setColsVer((v) => v + 1);
     return () => { live = false; };
-  }, [ready, opt.view3d, opt.tall, opt.inches, bars3d, meta, grid, layerKey, t, fr, mode, lim, mPerCm]);
+  }, [ready, opt.view3d, opt.tall, opt.inches, bars3d, meta, grid, layerKey, t, fr, mode, lim, mPerCm, other, splitOn, splitAt]);
   // Numbers beside the columns. They appear once you zoom in past the opening 3D view, biggest changes first,
   // and any that would sit on top of another are left out. Zoom further and more of them fit.
   useEffect(() => {
@@ -636,6 +644,19 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       m.addLayer({ id: ids[k], type: "raster", source: ids[k], paint: { "raster-opacity": base === "sat" ? 1 : 0, "raster-opacity-transition": { duration: 900, delay: 0 }, "raster-fade-duration": 0, "raster-saturation": 0.08, "raster-contrast": 0.08 } }, m.getLayer("relief") ? "relief" : top.current); });
     return () => ids.forEach((id) => { if (m.getLayer(id)) m.removeLayer(id); if (m.getSource(id)) m.removeSource(id); });
   }, [ready, meta?.id, base]);
+  // The divider and its two labels for the band split view.
+  const splitMarks = useRef([]);
+  useEffect(() => {
+    const m = map.current; splitMarks.current.forEach((k) => k.remove()); splitMarks.current = [];
+    if (!m || !ready) return;
+    const data = { type: "FeatureCollection", features: [] };
+    if (splitOn) { const [w, s, e, n] = meta.bbox, x = w + splitAt * (e - w);
+      data.features.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [[x, s], [x, n]] } });
+      [[layer.sensor, "right", -8], [otherLayer.sensor, "left", 8]].forEach(([sen, anchor, dx]) => { const el = document.createElement("div"); el.className = "bandtag"; el.textContent = BAND[sen]; el.style.borderColor = C[sen];
+        splitMarks.current.push(new maplibregl.Marker({ element: el, anchor, offset: [dx, 0] }).setLngLat([x, n - (n - s) * 0.06]).addTo(m)); }); }
+    if (m.getSource("splitline")) m.getSource("splitline").setData(data);
+    else { m.addSource("splitline", { type: "geojson", data }); m.addLayer({ id: "splitline", type: "line", source: "splitline", paint: { "line-color": "#ffffff", "line-width": 2, "line-opacity": 0.9 } }); }
+  }, [ready, splitOn, splitAt, meta?.id, layerKey]);
   // Arriving at a place: the colours and columns are held back while the camera travels, then the colour washes in and the columns rise.
   const riseK = useRef(1), riseRaf = useRef(0);
   const setRise = (m, k) => { riseK.current = k;
@@ -1028,6 +1049,12 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             <div className="chips">
               {KINDS.filter(([k]) => has(sensor, k)).map(([k, name]) => <button key={k} className={layer.kind === k ? "on" : ""} aria-pressed={layer.kind === k} onClick={() => choose(sensor, k)}>{name}</button>)}
             </div>
+            {otherLayer && !speed && (
+              <div className="splitrow">
+                <Toggle label="Split by band" hint={`Left: ${BAND[layer.sensor]}. Right: ${BAND[otherLayer.sensor]}. Same place, same dates.`} on={split} onChange={setSplit} />
+                {split && <input type="range" min="10" max="90" value={Math.round(splitAt * 100)} onChange={(e) => setSplitAt(+e.target.value / 100)} aria-label="Move the divider between the two radars" />}
+                {splitOn && oLate && <p className="muted" style={{ margin: "6px 0 0" }}>{BAND[otherLayer.sensor].split(" ·")[0]} has no pass near this date here (its record runs {fmtDate(otherLayer.dates[0])} to {fmtDate(otherLayer.dates[otherLayer.dates.length - 1])}), so the right side is empty. Move the date back.</p>}
+              </div>)}
             {meta.dropped && <p className="muted" style={{ margin: "8px 0 0" }}>{meta.dropped}</p>}
           </div>
             <div className="two">

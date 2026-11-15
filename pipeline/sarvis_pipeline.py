@@ -60,7 +60,9 @@ SITES = {
     "portuguese-bend": {
         "name": "Portuguese Bend landslide, Rancho Palos Verdes, CA",
         "emoji": "\u26f0\ufe0f", "short": "Portuguese Bend",
-        "story": "A hillside neighbourhood sliding slowly toward the ocean. Rain soaks in and the ground speeds up.",
+        "story": "A hillside neighbourhood sliding slowly toward the ocean.",
+        # What the first full real run showed (Nov 2025 to Oct 2026), written by hand from the numbers, shown in the tour:
+        "finding": "In this record the slide moved fastest in the wet winter months, about 6 cm a month, and slowed to about 3.5 by autumn. Single storms do not line up with single speed-ups.",
         "bbox": (-118.420, 33.715, -118.320, 33.790),
         "ref_box": (-118.385, 33.770, -118.365, 33.785),     # contains continuous GPS station PVHS
         "focus_box": (-118.385, 33.733, -118.350, 33.752),   # CHECK: rough box around the active slide
@@ -611,7 +613,7 @@ if ev:
 
 # %%
 # 11. Export for the web app. Values are int16 hundredths of a cm, -32768 = no data, row 0 = north.
-meta = {"id": SITE, "name": cfg["name"], "short": cfg.get("short", SITE), "emoji": cfg.get("emoji", ""), "story": cfg.get("story", ""),
+meta = {"id": SITE, "name": cfg["name"], "short": cfg.get("short", SITE), "emoji": cfg.get("emoji", ""), "story": cfg.get("story", ""), "finding": cfg.get("finding", ""),
         "event": cfg.get("event"), "bbox": [W, S, E, N], "nx": nx, "ny": ny,
         "units": "cm", "scale": 0.01, "nodata": -32768, "ref_box": list(cfg["ref_box"]),
         "focus_box": list(cfg["focus_box"]),

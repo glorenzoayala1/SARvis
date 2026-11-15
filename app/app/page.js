@@ -73,7 +73,7 @@ export default function Page() {
   const [layerKey, setLayerKey] = useState(null);
   const [grid, setGrid] = useState(null);
   const [other, setOther] = useState(null);     // same measurement from the other sensor
-  const [t, setT] = useState(0);
+  const [tRaw, setT] = useState(0);
   const [pick, setPick] = useState(null);       // {i, j, lon, lat, station?}
   const [playing, setPlaying] = useState(false);
   const [mode, setMode] = useState("total");    // "total" = change since first date, "speed" = cm per 30 days between dates
@@ -121,6 +121,8 @@ export default function Page() {
   }, [siteId]);
 
   const layer = meta?.layers.find((l) => l.key === layerKey);
+  // the selected date, kept inside the current layer's range (the two radars have different numbers of dates)
+  const t = layer && !layer.static ? Math.min(tRaw, layer.dates.length - 1) : tRaw;
   const otherLayer = layer && !layer.static ? meta.layers.find((l) => l.kind === layer.kind && l.sensor !== layer.sensor && !l.static) : null;
 
   const load = (m, l) => {
@@ -412,8 +414,8 @@ export default function Page() {
         say: () => `${meta.story} Red is sinking, blue is rising.` },
       { title: "The fastest spot", layer: "up", mode: "total", pick: "hot", point: "hot", label: "Moved the most", glow: "pickcard",
         say: (d) => d.hot ? `This spot went ${d.hot.v < 0 ? "down" : "up"} ${cm(d.hot.v)} between ${fmtDate(d.layer.dates[0])} and ${fmtDate(d.layer.dates[d.layer.dates.length - 1])}. Each dot on the chart is one satellite pass.` : "Finding the fastest spot…" },
-      { title: "Rain, then speed", layer: "up", mode: "speed", pick: "hot", point: "hot", label: "Same spot, now speed", glow: "weather",
-        say: () => "Now the chart shows speed in cm per month. Compare its peaks with the rainfall bars below it." },
+      { title: "Speed and rain", layer: "up", mode: "speed", pick: "hot", point: "hot", label: "Same spot, now speed", glow: "weather",
+        say: () => `Now the chart shows speed in cm per month, with the rainfall bars below it. ${meta.finding || "Compare its peaks with the rain."}` },
       ...(hasS1 ? [{ title: "Old radar, new radar", layer: "s1_up", mode: "total", point: "box", label: "Blank = no reading", glow: "coverage",
         say: (d) => { const a = lo(d.cov?.nisar), c = lo(d.cov?.s1); return `This is Sentinel-1, whose 5.5 cm wavelength is a quarter of NISAR's.${a !== null && c !== null ? ` Over the same weeks it got a usable reading in the yellow box on ${Math.round(100 * c)}% of passes; NISAR managed ${Math.round(100 * a)}%.` : ""}`; } }] : []),
       ...(st ? [{ title: "Checked on the ground", layer: "up", mode: "total", station: st, point: "station", label: `GPS ${st.id}`, glow: "pickcard", notes: true,

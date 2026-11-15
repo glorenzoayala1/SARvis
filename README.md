@@ -34,7 +34,7 @@ for Portuguese Bend (landslide) and the Central Valley near Corcoran (subsidence
 
 Deploy on Vercel: import the repo, set Root Directory to `app`, framework Next.js.
 
-The radar layers shipped in `app/public/data` are SYNTHETIC (the app shows a banner). Rainfall and GPS in
+Portuguese Bend in `app/public/data` is REAL NISAR and Sentinel-1 data (full run of 2026-11-14, both tracks). Central Valley and Destin are still SYNTHETIC radar layers (the app shows a banner on those). Rainfall and GPS in
 that folder are real. Replace the folder contents with pipeline output.
 
 ## Self-test without Earthdata
@@ -43,7 +43,7 @@ that folder are real. Replace the folder contents with pipeline output.
     SARVIS_SYNTH=1 SARVIS_SYNTH_DIR=/tmp/synth SARVIS_SYNTH_S1_DIR=/tmp/synth_s1 SARVIS_OUT=/tmp/web_data python pipeline/sarvis_pipeline.py
 
 ## Not yet verified against real files
-- Phase sign convention (`PHASE_SIGN`). Check on Portuguese Bend ascending: the slide must be negative.
+- Phase sign convention (`PHASE_SIGN`): checked on the real Portuguese Bend run. The slide is negative on the ascending track, as it should be. Not checked against an on-slide ground measurement.
 - First real run (2026-11-14, Central Valley, 3 pairs): 18.6 s per cropped pair; scene-wide tilts of several cm per pair,
   which is why ionosphere correction (`APPLY_IONO = "auto"`) and per-pair plane removal (`deramp`) were added.
 - The mask layer in real files carries higher bits than opera-utils documents; only its low byte is used.

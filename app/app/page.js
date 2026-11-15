@@ -118,6 +118,7 @@ export default function Page() {
   const [dragH, setDragH] = useState(null);
   const [landTick, setLandTick] = useState(0);
   const optRef = useRef(null); optRef.current = opt;
+  const under = useRef(null);
   const starsEl = useRef(null);
   const readoutFor = useRef("");
   const [siteMenu, setSiteMenu] = useState(false);
@@ -177,7 +178,7 @@ export default function Page() {
       center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 84, minZoom: 1.3, canvasContextAttributes: { antialias: true },
     });
     map.current.touchZoomRotate.disableRotation();
-    map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    map.current.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-left");
     map.current.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
     const m = map.current;
     if (typeof window !== "undefined") window.__sarvisMap = m;      // handy for debugging in the console
@@ -198,7 +199,7 @@ export default function Page() {
       m.addSource("sat", { type: "raster", tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 16, attribution: "Imagery: USGS The National Map" });
       m.addLayer({ id: "base-sat", type: "raster", source: "sat", paint: { "raster-brightness-max": 0.96, "raster-saturation": 0.08, "raster-contrast": 0.1, "raster-opacity": 0, "raster-opacity-transition": { duration: 900, delay: 0 } } }, top.current);
       // Shaded relief worked out from the elevation data: sunlit and shadowed slopes give the land its shape.
-      if (!m.getSource("relief")) { m.addSource("relief", { type: "raster-dem", tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: 256, maxzoom: 14 });
+      if (!m.getSource("relief")) { m.addSource("relief", { type: "raster-dem", tiles: [DEM_TILES], encoding: "terrarium", tileSize: 512, maxzoom: 13 });
         m.addLayer({ id: "relief", type: "hillshade", source: "relief", minzoom: 7, paint: { "hillshade-exaggeration": 0.55, "hillshade-shadow-color": "rgba(8,18,38,0.85)", "hillshade-highlight-color": "rgba(255,244,214,0.55)", "hillshade-accent-color": "rgba(8,18,38,0.4)", "hillshade-illumination-direction": 315 } }, top.current); }
       // Make place names readable over imagery and the radar layer, whatever the style's own colours are.
       m.getStyle().layers.filter((l) => l.type === "symbol").forEach((l) => {
@@ -333,6 +334,12 @@ export default function Page() {
     map.current.setPaintProperty("base-sat", "raster-opacity", base === "sat" ? 1 : 0);        // cross-fades between the two backgrounds
     roads.current.forEach((id) => { try { map.current.setPaintProperty(id, "line-color", base === "sat" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.12)"); } catch {} });
     blds.current.forEach((id) => { try { map.current.setLayoutProperty(id, "visibility", base === "sat" ? "none" : "visible"); } catch {} });
+    // The imagery stops a little way offshore and far inland tiles arrive late. Under the satellite view, colour the street map's own
+    // sea and land to match, so those gaps read as open water and hazy ground instead of black.
+    const m = map.current;
+    if (!under.current) under.current = m.getStyle().layers.filter((l) => l.type === "background" || (l.type === "fill" && l["source-layer"] === "water"))
+      .map((l) => ({ id: l.id, prop: l.type === "background" ? "background-color" : "fill-color", was: m.getPaintProperty(l.id, l.type === "background" ? "background-color" : "fill-color"), sea: l.type !== "background" }));
+    under.current.forEach((u) => { try { m.setPaintProperty(u.id, u.prop, base === "dark" ? u.was : u.sea ? "#2b3f50" : "#66706a"); } catch {} });
   }, [base, ready]);
   const pin = useRef(null);
   useEffect(() => {
@@ -571,6 +578,9 @@ const CLOUD_BASE_M = 1000;    // lowest cloud layer height above sea level, befo
                               // the layer is raised when needed so it stays above the default 3D camera.
 const KEYWORD = { down: "sank", up: "rose" };
 const EARTH_DAY = "2026-10-13";   // the day of the whole-Earth satellite picture: the last radar date at Portuguese Bend
+// Elevation tiles for the 3D ground and shaded relief. The older Mapzen set has bad pixels around Los Angeles harbour
+// (values of 450 m at sea level), which drew as needle-shaped mountains. Mapterhorn's set is clean there.
+const DEM_TILES = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
 const GLOBE_ABOVE = 8;         // below this zoom the flat map bends into a globe (fully round by zoom 5.5)
 const PEEK = 148;             // height of the footer when it is down, in pixels (matches .sheet --h in the stylesheet)
 const IMPACT_TOP = 0.5;      // storm-change colour is full strength where the radar lost half its usual signal or more
@@ -684,7 +694,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const m = map.current; if (!m || !ready || !meta) return;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (opt.view3d) {
-      if (!m.getSource("dem")) m.addSource("dem", { type: "raster-dem", tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: 256, maxzoom: 14, attribution: "Terrain: Mapzen, AWS Open Data" });
+      if (!m.getSource("dem")) m.addSource("dem", { type: "raster-dem", tiles: [DEM_TILES], encoding: "terrarium", tileSize: 512, maxzoom: 13, attribution: "Terrain: Mapterhorn" });
       m.setTerrain({ source: "dem", exaggeration: TERRAIN_X });
       m.dragRotate.enable(); m.touchZoomRotate.enableRotation();
       const f = (meta.event ? null : meta.focus_box) || meta.bbox, cam = m.cameraForBounds([[f[0], f[1]], [f[2], f[3]]], { padding: { top: 90, bottom: 230, left: 30, right: 30 } });
@@ -728,7 +738,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       const k = ctx?.wind ? ctx.wind.dates.indexOf(day) : -1; let vx = 0, vy = 0;
       if (k >= 0 && !calm) { const to = ((ctx.wind.dir[k] + 180) * Math.PI) / 180, sp = (Math.max(1, ctx.wind.speed[k]) * CLOUD_SPEEDUP) / 1000;   // "dir" is where the wind comes from; km per second
         vx = Math.sin(to) * sp; vy = Math.cos(to) * sp; }
-      d = { on: true, lon0, lat0, alt: Math.max(CLOUD_BASE_M * TERRAIN_X, camAlt3d.current * 1.3), cover: showCloud ? cloudPct / 100 : -1, ox: (seed % 977) * 1.7, oy: (seed % 619) * 2.3, vx, vy, t0: performance.now() };
+      d = { on: true, calm, lon0, lat0, alt: Math.max(CLOUD_BASE_M * TERRAIN_X, camAlt3d.current * 1.3), cover: showCloud ? cloudPct / 100 : -1, ox: (seed % 977) * 1.7, oy: (seed % 619) * 2.3, vx, vy, t0: performance.now() };
     }
     cloudData.current = d;
     if (typeof window !== "undefined") { window.__sarvisClouds = d.on ? d.cover : null; window.__sarvisCloudD = d; }
@@ -742,7 +752,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             vec3 q = vec3(u_ctr.xy + (a_pos.xy - u_ctr.xy) * wide, u_ground > 1.5 ? a_pos.z * 30.0 : (u_ground > 0.5 ? 0.0 : a_pos.z));
             vec4 p = u_m * vec4(q, 1.0); p.z = (u_ground > 1.5 ? 0.9999 : 0.9995) * p.w;
             gl_Position = p; }`));     // pinned to the far depth: land and columns stay in front
-        gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision highp float; varying vec2 v_km; uniform vec2 u_off; uniform float u_cover; uniform float u_below; uniform float u_ground; uniform vec2 u_cam; uniform float u_reach;
+        gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision highp float; varying vec2 v_km; uniform vec2 u_off; uniform float u_cover; uniform float u_below; uniform float u_ground; uniform vec2 u_cam; uniform float u_reach; uniform float u_t;
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
             return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
@@ -751,17 +761,17 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             // Lay the pattern out by viewing angle, like a dome overhead, so clouds keep their shape towards the horizon instead of smearing into lines.
             float ang = atan(dist / max(u_reach, 0.05));                                  // 0 straight up, about 1.57 at the horizon
             vec2 p = rel / max(dist, 0.001) * ang * 9.0 + u_off * 0.04;
-            p += 0.8 * vec2(fbm(p * 0.6 + 3.1), fbm(p * 0.6 + 11.7)) - 0.4;                 // bend the pattern so billows curl instead of lining up
-            float n = fbm(p);
+            p += 0.8 * vec2(fbm(p * 0.6 + 3.1 + u_t * 0.021), fbm(p * 0.6 + 11.7 - u_t * 0.017)) - 0.4;                 // bend the pattern so billows curl instead of lining up
+            float n = 0.8 * fbm(p + vec2(u_t * 0.012, 0.0)) + 0.2 * fbm(p * 0.5 + 23.0 - u_t * 0.03) / 0.97;      // the pattern itself evolves, so clouds slowly change shape
             float th = 0.62 - 0.36 * u_cover;                                             // more cover -> lower bar -> more of the sheet is cloud
             float d = smoothstep(th, th + 0.26, n), thick = smoothstep(th + 0.1, th + 0.5, n);
             float lit = fbm(p * 2.2 + 70.0);                                              // gentle light and shade inside the cloud
             vec3 col = mix(vec3(1.0, 0.99, 0.97), vec3(0.64, 0.69, 0.77), thick * (0.55 + 0.45 * lit));
-            float a = d * (1.0 - smoothstep(1.47, 1.56, ang)) * mix(0.36, 0.94, u_below);       // seen from above it stays thin so the data is readable; it melts into the horizon
+            float a = d * (1.0 - smoothstep(1.36, 1.55, ang)) * mix(0.36, 0.94, u_below);       // seen from above it stays thin so the data is readable; it melts into the horizon
             gl_FragColor = vec4(col * a, a); }`));
         gl.linkProgram(pr);
         this.pr = pr; this.buf = gl.createBuffer(); this.vao = gl.createVertexArray ? gl.createVertexArray() : null;   // our own vertex state, so the map's layers are left untouched
-        this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), km: gl.getAttribLocation(pr, "a_km"), m: gl.getUniformLocation(pr, "u_m"), off: gl.getUniformLocation(pr, "u_off"), cover: gl.getUniformLocation(pr, "u_cover"), below: gl.getUniformLocation(pr, "u_below"), ground: gl.getUniformLocation(pr, "u_ground"), cam: gl.getUniformLocation(pr, "u_cam"), ctr: gl.getUniformLocation(pr, "u_ctr"), reach: gl.getUniformLocation(pr, "u_reach") };
+        this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), km: gl.getAttribLocation(pr, "a_km"), m: gl.getUniformLocation(pr, "u_m"), off: gl.getUniformLocation(pr, "u_off"), cover: gl.getUniformLocation(pr, "u_cover"), below: gl.getUniformLocation(pr, "u_below"), ground: gl.getUniformLocation(pr, "u_ground"), cam: gl.getUniformLocation(pr, "u_cam"), ctr: gl.getUniformLocation(pr, "u_ctr"), reach: gl.getUniformLocation(pr, "u_reach"), t: gl.getUniformLocation(pr, "u_t") };
       },
       render(gl, args) {
         const d = cloudData.current, L = this.loc, mm = map.current; if (!d.on || !mm) return;
@@ -785,16 +795,16 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         const nVert = o / 5;
         gl.useProgram(this.pr); if (this.vao) gl.bindVertexArray(this.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, 20, 0); gl.enableVertexAttribArray(L.km); gl.vertexAttribPointer(L.km, 2, gl.FLOAT, false, 20, 12);
-        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x + camE * u, c.y - camN * u, c.z); gl.uniform1f(L.reach, Math.max(0.15, Math.abs(d.alt - camAlt) / 1000));     // haze starts a little past the point the camera looks at, at any zoom
+        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.t, d.calm ? 0 : sec); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x + camE * u, c.y - camN * u, c.z); gl.uniform1f(L.reach, Math.max(0.15, Math.abs(d.alt - camAlt) / 1000));     // haze starts a little past the point the camera looks at, at any zoom
         gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         gl.enable(gl.DEPTH_TEST);                                                                               // land and columns stay in front of everything drawn here
         gl.uniform1f(L.ground, 0); gl.drawArrays(gl.TRIANGLES, 0, nVert);                                       // the cloud layer
         if (this.vao) gl.bindVertexArray(null);
       } });            // added last: anything placed lower is painted over when the terrain is drawn
     m.triggerRepaint();
-    if (!d.on || (!d.vx && !d.vy)) return;
-    let raf = 0, skip = false;                                   // keep the map redrawing (about 30 times a second) while the layer drifts
-    const tick = () => { skip = !skip; if (!skip) m.triggerRepaint(); raf = requestAnimationFrame(tick); };
+    if (!d.on || calm || d.cover < 0) return;
+    let raf = 0, skip = true;                                   // keep the map redrawing (about 30 times a second) while the layer drifts
+    const tick = () => { m.triggerRepaint(); raf = requestAnimationFrame(tick); };       // every frame, so drift and shape change are smooth
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t, ctx, cam3d]);
@@ -816,6 +826,16 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     return () => { m.off("zoom", onZoom); m.off("zoomend", onEnd); };
   }, [ready, opt.view3d, bars3d, tour]);
 
+  // In 3D, a sideways two-finger swipe on a trackpad (or a sideways scroll wheel) turns the view around the place.
+  useEffect(() => {
+    const m = map.current; if (!m || !ready || !opt.view3d) return;
+    const el = m.getContainer();
+    const turn = (e) => { if (e.ctrlKey || Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.2) return;       // mostly up-and-down scrolling still zooms
+      e.preventDefault(); e.stopPropagation(); m.setBearing(m.getBearing() + e.deltaX * 0.18); };
+    el.addEventListener("wheel", turn, { passive: false, capture: true });
+    return () => el.removeEventListener("wheel", turn, { capture: true });
+  }, [ready, opt.view3d]);
+
   // In 3D the camera slowly circles the place. Touching the map pauses it; it picks up again a few seconds after you let go.
   useEffect(() => {
     const m = map.current; if (!m || !ready || !opt.view3d || !opt.orbit || tour || showSettings || pick) return;      // it also holds still while a spot readout is open
@@ -826,9 +846,10 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const hold = () => { held = true; clearTimeout(timer); }, release = () => { held = false; later(5000); };
     const onEnd = (e) => { if (held) return; later(e.orbit ? 0 : 4000); };       // always on a fresh tick: restarting inside the map's own move-end handling broke the next flight
     const el = m.getContainer();
-    el.addEventListener("pointerdown", hold); el.addEventListener("wheel", () => { hold(); release(); }, { passive: true }); window.addEventListener("pointerup", release);
+    let wt = 0; const onWheel = () => { hold(); clearTimeout(wt); wt = setTimeout(release, 1200); };      // scrolling counts as touching the map until it stops
+    el.addEventListener("pointerdown", hold); el.addEventListener("wheel", onWheel, { passive: true }); window.addEventListener("pointerup", release);
     m.on("moveend", onEnd); later(2500);
-    return () => { live = false; clearTimeout(timer); m.off("moveend", onEnd); el.removeEventListener("pointerdown", hold); window.removeEventListener("pointerup", release); m.stop(); };
+    return () => { live = false; clearTimeout(timer); m.off("moveend", onEnd); el.removeEventListener("pointerdown", hold); el.removeEventListener("wheel", onWheel); clearTimeout(wt); window.removeEventListener("pointerup", release); m.stop(); };
   }, [ready, opt.view3d, opt.orbit, tour, showSettings, siteId, !!pick]);
 
   // Readout beside the spot you pressed: the numbers resolve out of ones and zeros, like a digital display.

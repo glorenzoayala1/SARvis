@@ -396,3 +396,5 @@ button.brandchip { transition: background .15s, transform .12s; } button.brandch
 @keyframes menu-in { from { opacity: 0; transform: translateY(-6px) scale(0.96); } to { opacity: 1; transform: none; } }
 @keyframes item-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .sitemenu, .sitemenu button { animation: none; } }
+
+.rd-top, .rd-bits { user-select: none; }

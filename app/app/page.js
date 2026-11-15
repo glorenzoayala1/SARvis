@@ -160,7 +160,7 @@ export default function Page() {
     map.current = new maplibregl.Map({
       container: mapDiv.current,
       style: "https://tiles.openfreemap.org/styles/dark",      // free vector map, no key (OpenFreeMap / OpenStreetMap)
-      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 84, minZoom: 1.3,
+      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 84, minZoom: 1.3, canvasContextAttributes: { antialias: true },
     });
     map.current.touchZoomRotate.disableRotation();
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
@@ -171,7 +171,7 @@ export default function Page() {
       // Zoom all the way out and the map becomes the Earth in space, with that day's real cloud from NASA's VIIRS satellite image.
       try {
         m.setProjection({ type: ["interpolate", ["linear"], ["zoom"], 5.5, "vertical-perspective", GLOBE_ABOVE, "mercator"] });
-        m.setSky({ "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0] });
+        m.setSky({ "sky-color": "#3d7bd6", "horizon-color": "#dfeaf5", "fog-color": "#dfeaf5", "sky-horizon-blend": 0.65, "horizon-fog-blend": 0.7, "fog-ground-blend": 0.7, "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0] });
         if (!m.getSource("earth")) {
           m.addSource("earth", { type: "raster", tileSize: 256, maxzoom: 8, attribution: "NASA GIBS / VIIRS",
             tiles: [`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/${EARTH_DAY}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`] });
@@ -181,7 +181,10 @@ export default function Page() {
       if (m.getSource("sat")) return;
       top.current = m.getStyle().layers.find((l) => l.type === "symbol")?.id;      // keep place names above everything we add
       m.addSource("sat", { type: "raster", tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 16, attribution: "Imagery: USGS The National Map" });
-      m.addLayer({ id: "base-sat", type: "raster", source: "sat", paint: { "raster-brightness-max": 0.78, "raster-saturation": -0.2, "raster-opacity": 0, "raster-opacity-transition": { duration: 900, delay: 0 } } }, top.current);
+      m.addLayer({ id: "base-sat", type: "raster", source: "sat", paint: { "raster-brightness-max": 0.96, "raster-saturation": 0.08, "raster-contrast": 0.1, "raster-opacity": 0, "raster-opacity-transition": { duration: 900, delay: 0 } } }, top.current);
+      // Shaded relief worked out from the elevation data: sunlit and shadowed slopes give the land its shape.
+      if (!m.getSource("relief")) { m.addSource("relief", { type: "raster-dem", tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: 256, maxzoom: 14 });
+        m.addLayer({ id: "relief", type: "hillshade", source: "relief", minzoom: 7, paint: { "hillshade-exaggeration": 0.55, "hillshade-shadow-color": "rgba(8,18,38,0.85)", "hillshade-highlight-color": "rgba(255,244,214,0.55)", "hillshade-accent-color": "rgba(8,18,38,0.4)", "hillshade-illumination-direction": 315 } }, top.current); }
       // Make place names readable over imagery and the radar layer, whatever the style's own colours are.
       m.getStyle().layers.filter((l) => l.type === "symbol").forEach((l) => {
         try {
@@ -682,20 +685,18 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
           float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
             return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
           float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.03 + 17.0; a *= 0.5; } return s; }
-          void main() { float dist = length(v_km - u_cam); vec3 hz = vec3(0.80, 0.86, 0.92);
-            if (u_ground > 1.5) { gl_FragColor = vec4(mix(vec3(0.33, 0.54, 0.86), hz, smoothstep(30.0, 900.0, dist)), 1.0); return; }      // open sky behind everything
-            if (u_ground > 0.5) { float f = smoothstep(2.3 * u_reach, 6.0 * u_reach, dist); gl_FragColor = vec4(hz * f, f); return; }                // distant land fades into haze up to the skyline
-            vec2 p = (v_km + u_off) / 2.6;
-            float n = 0.72 * fbm(p) + 0.28 * fbm(p * 0.23 + 40.0) / 0.97;                // fine billows on top of broad patches
-            float th = 0.70 - 0.44 * u_cover;                                             // more cover -> lower bar -> more of the sheet is cloud
-            float d = smoothstep(th, th + 0.2, n), thick = smoothstep(th + 0.05, th + 0.45, n);
-            float haze = smoothstep(6.0, 110.0, dist);
-            vec3 under = mix(vec3(0.93, 0.94, 0.96), vec3(0.55, 0.59, 0.66), thick);     // seen from below: thicker cloud is darker
-            vec3 sky = mix(vec3(0.36, 0.56, 0.86), vec3(0.74, 0.84, 0.94), smoothstep(2.0, 50.0, dist));
-            vec3 below = mix(mix(sky, under, d), hz, haze);
-            float aAbove = d * 0.38 * (1.0 - smoothstep(8.0, 30.0, dist));               // seen from above: thin and see-through so the data stays readable
-            vec4 above = vec4(vec3(0.97, 0.98, 1.0) * aAbove, aAbove);
-            gl_FragColor = mix(above, vec4(below, 1.0), u_below); }`));
+          void main() { vec2 rel = v_km - u_cam; float dist = length(rel);
+            // Lay the pattern out by viewing angle, like a dome overhead, so clouds keep their shape towards the horizon instead of smearing into lines.
+            float ang = atan(dist / max(u_reach, 0.05));                                  // 0 straight up, about 1.57 at the horizon
+            vec2 p = rel / max(dist, 0.001) * ang * 9.0 + u_off * 0.04;
+            p += 0.8 * vec2(fbm(p * 0.6 + 3.1), fbm(p * 0.6 + 11.7)) - 0.4;                 // bend the pattern so billows curl instead of lining up
+            float n = fbm(p);
+            float th = 0.62 - 0.36 * u_cover;                                             // more cover -> lower bar -> more of the sheet is cloud
+            float d = smoothstep(th, th + 0.26, n), thick = smoothstep(th + 0.1, th + 0.5, n);
+            float lit = fbm(p * 2.2 + 70.0);                                              // gentle light and shade inside the cloud
+            vec3 col = mix(vec3(1.0, 0.99, 0.97), vec3(0.64, 0.69, 0.77), thick * (0.55 + 0.45 * lit));
+            float a = d * (1.0 - smoothstep(1.47, 1.56, ang)) * mix(0.36, 0.94, u_below);       // seen from above it stays thin so the data is readable; it melts into the horizon
+            gl_FragColor = vec4(col * a, a); }`));
         gl.linkProgram(pr);
         this.pr = pr; this.buf = gl.createBuffer(); this.vao = gl.createVertexArray ? gl.createVertexArray() : null;   // our own vertex state, so the map's layers are left untouched
         this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), km: gl.getAttribLocation(pr, "a_km"), m: gl.getUniformLocation(pr, "u_m"), off: gl.getUniformLocation(pr, "u_off"), cover: gl.getUniformLocation(pr, "u_cover"), below: gl.getUniformLocation(pr, "u_below"), ground: gl.getUniformLocation(pr, "u_ground"), cam: gl.getUniformLocation(pr, "u_cam"), ctr: gl.getUniformLocation(pr, "u_ctr"), reach: gl.getUniformLocation(pr, "u_reach") };
@@ -722,11 +723,9 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         const nVert = o / 5;
         gl.useProgram(this.pr); if (this.vao) gl.bindVertexArray(this.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, 20, 0); gl.enableVertexAttribArray(L.km); gl.vertexAttribPointer(L.km, 2, gl.FLOAT, false, 20, 12);
-        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x + camE * u, c.y - camN * u, c.z); gl.uniform1f(L.reach, Math.max(1, tr.cameraToCenterDistance / ppm / 1000));     // haze starts a little past the point the camera looks at, at any zoom
+        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x + camE * u, c.y - camN * u, c.z); gl.uniform1f(L.reach, Math.max(0.15, Math.abs(d.alt - camAlt) / 1000));     // haze starts a little past the point the camera looks at, at any zoom
         gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         gl.enable(gl.DEPTH_TEST);                                                                               // land and columns stay in front of everything drawn here
-        gl.uniform1f(L.ground, 1); gl.drawArrays(gl.TRIANGLES, 0, nVert);                                       // haze where the map has no land to show, out to the skyline
-        gl.uniform1f(L.ground, 2); gl.drawArrays(gl.TRIANGLES, 0, nVert);                                       // open sky
         gl.uniform1f(L.ground, 0); gl.drawArrays(gl.TRIANGLES, 0, nVert);                                       // the cloud layer
         if (this.vao) gl.bindVertexArray(null);
       } });            // added last: anything placed lower is painted over when the terrain is drawn

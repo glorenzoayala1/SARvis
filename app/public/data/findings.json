@@ -1,0 +1,199 @@
+{
+ "generated": "2026-11-15",
+ "sites": {
+  "portuguese-bend": {
+   "place": "Portuguese Bend landslide, Rancho Palos Verdes, CA",
+   "kind": "motion",
+   "big": "1.3 m",
+   "big_note": "the fastest spot sank, 5 Dec 2025 to 13 Oct 2026",
+   "conclusion": "The slide moved the whole time from 5 Dec 2025 to 13 Oct 2026, up to 1.3 m at its fastest spot. It sank fastest in January 2026 and slowest in September 2026. NISAR kept a reading on the slide far more often than Sentinel-1 did.",
+   "points": [
+    "Between 5 Dec 2025 and 13 Oct 2026 (312 days) the fastest spot sank 127 cm.",
+    "44% of the study box sank more than 10 cm. Across that part the middle value is 50 cm.",
+    "It sank fastest in January 2026 (6.4 cm a month) and slowest in September 2026 (3.1 cm a month).",
+    "The wettest month was February 2026 (94 mm of rain), when it sank 5.8 cm. Pass by pass, speed and rain barely line up (correlation 0.17).",
+    "From 23 Nov 2025 to 17 Mar 2026, when both radars were flying, NISAR got a usable reading in the study box on 72% and 61% of passes (its two directions). Sentinel-1 got 46% and 44%."
+   ],
+   "sure": "The only GPS stations are off the slide, so the largest numbers have no ground measurement to confirm them. The fastest spot went down in 23 of its 23 steps between passes, and its largest single step was 12 cm, so the total is not the product of one bad reading.",
+   "numbers": {
+    "from": "20251205",
+    "to": "20261013",
+    "days": 312,
+    "peak_cm": -127.3,
+    "peak_at": [
+     33.75,
+     -118.3661
+    ],
+    "box_middle_cm": -6.4,
+    "share_over_10cm": 0.435,
+    "moving_middle_cm": -49.7,
+    "fastest_month": [
+     2026,
+     1,
+     6.4
+    ],
+    "slowest_month": [
+     2026,
+     9,
+     3.1
+    ],
+    "wettest_month": [
+     2026,
+     2,
+     94,
+     5.8
+    ],
+    "speed_rain_correlation": 0.17,
+    "coverage": {
+     "focus_box": [
+      -118.385,
+      33.733,
+      -118.35,
+      33.752
+     ],
+     "window": [
+      "20251123",
+      "20260317"
+     ],
+     "nisar": {
+      "asc": 0.722,
+      "desc": 0.613
+     },
+     "s1": {
+      "asc": 0.46,
+      "desc": 0.443
+     }
+    },
+    "peak_steps_down": [
+     23,
+     23
+    ],
+    "peak_largest_step_cm": 12.2,
+    "nisar_minus_s1": 0.216
+   }
+  },
+  "central-valley": {
+   "place": "Central Valley subsidence near Corcoran, CA",
+   "kind": "motion",
+   "big": "33 cm",
+   "big_note": "the fastest spot sank, 30 Nov 2025 to 8 Oct 2026",
+   "conclusion": "The ground here rose slightly through the winter and then sank steadily from February on, by 12 cm across the sinking part of the study box and 33 cm at the deepest spot by 8 Oct 2026.",
+   "points": [
+    "GPS station HANF rose 2.1 cm from 30 Nov 2025 to 17 Feb 2026, then sank 8.8 cm by 8 Oct 2026.",
+    "Between 30 Nov 2025 and 8 Oct 2026 (312 days) the fastest spot sank 33 cm.",
+    "41% of the study box sank more than 10 cm. Across that part the middle value is 12 cm.",
+    "It sank fastest in March 2026 (3.7 cm a month). In December 2025 it rose instead (0.8 cm).",
+    "The wettest month was February 2026 (88 mm of rain), when it sank 1.1 cm. Pass by pass, speed and rain barely line up (correlation -0.30).",
+    "From 28 Nov 2025 to 28 Mar 2026, when both radars were flying, NISAR got a usable reading in the study box on 90% and 89% of passes (its two directions). Sentinel-1 got 82% and 86%."
+   ],
+   "sure": "The first run disagreed with GPS by up to 15 cm, so every date is pinned to GPS station HANF. That station sets the zero and is not an independent check. East-west motion is left out because the two viewing directions disagree.",
+   "numbers": {
+    "from": "20251130",
+    "to": "20261008",
+    "days": 312,
+    "peak_cm": -33.0,
+    "peak_at": [
+     36.1449,
+     -119.4997
+    ],
+    "box_middle_cm": -9.1,
+    "share_over_10cm": 0.407,
+    "moving_middle_cm": -12.2,
+    "fastest_month": [
+     2026,
+     3,
+     3.7
+    ],
+    "slowest_month": [
+     2025,
+     12,
+     -0.8
+    ],
+    "wettest_month": [
+     2026,
+     2,
+     88,
+     1.1
+    ],
+    "speed_rain_correlation": -0.3,
+    "coverage": {
+     "focus_box": [
+      -119.7,
+      36.05,
+      -119.5,
+      36.2
+     ],
+     "window": [
+      "20251128",
+      "20260328"
+     ],
+     "nisar": {
+      "asc": 0.899,
+      "desc": 0.886
+     },
+     "s1": {
+      "asc": 0.822,
+      "desc": 0.862
+     }
+    },
+    "peak_steps_down": [
+     18,
+     21
+    ],
+    "peak_largest_step_cm": 5.0,
+    "nisar_minus_s1": 0.051,
+    "gps": {
+     "station": "HANF",
+     "rise_cm": 2.1,
+     "peak": "20260217",
+     "fall_cm": 8.8
+    }
+   }
+  },
+  "destin": {
+   "place": "Hurricane Isaias landfall near Destin, FL",
+   "kind": "event",
+   "big": "38% to 40%",
+   "big_note": "drop in signal quality in the storm pass (landfall 10 Oct 2026 UTC)",
+   "conclusion": "NISAR recorded Hurricane Isaias passing: signal quality fell by 38% to 40% in the passes that span landfall (10 Oct 2026 UTC, the evening before in local time). The two viewing directions do not agree on where the ground changed, so this is evidence of the storm, not a damage map.",
+   "points": [
+    "Ascending direction: average signal quality was 0.25 over the 4 calm passes before the storm, and 0.16 in the pass from 5 Oct 2026 to 17 Oct 2026, which spans landfall. That is a 38% drop.",
+    "Descending direction: average signal quality was 0.37 over the 4 calm passes before the storm, and 0.23 in the pass from 9 Oct 2026 to 21 Oct 2026, which spans landfall. That is a 40% drop.",
+    "Inside the study box on the coast, 20% of the ground changed by more than 30% in the descending direction but only 1% in the ascending one.",
+    "Only 34% of the area gives a reading in both directions. The rest is water or ground the radar could not follow."
+   ],
+   "sure": "The baseline is only 4 calm passes per direction, and it includes heavy rain in early October. Landfall near Destin at about 8:30 pm local time on 9 October 2026 as a Category 2 hurricane with 105 mph winds, as reported by NBC News and AccuWeather from National Hurricane Center advisories. These are figures from the time, not the final storm report.",
+   "numbers": {
+    "landfall_utc": "20261010",
+    "tracks": {
+     "asc": {
+      "storm_pass": [
+       "20261005",
+       "20261017"
+      ],
+      "storm_quality": 0.157,
+      "calm_quality": 0.254,
+      "calm_passes": 4,
+      "drop": 0.382,
+      "box_share_changed_over_30pct": 0.008,
+      "area_with_reading": 0.339
+     },
+     "desc": {
+      "storm_pass": [
+       "20261009",
+       "20261021"
+      ],
+      "storm_quality": 0.225,
+      "calm_quality": 0.374,
+      "calm_passes": 4,
+      "drop": 0.398,
+      "box_share_changed_over_30pct": 0.198,
+      "area_with_reading": 0.523
+     }
+    },
+    "area_with_reading": 0.335
+   }
+  }
+ },
+ "overall": "In under a year of data, NISAR measured a landslide that sank up to 1.3 m, farmland that sank up to 33 cm, and a hurricane landfall that showed up as a loss of signal. Against Sentinel-1, its advantage was large on the steep, vegetated slide (22 percentage points more passes with a reading) and small on open farmland (5 points)."
+}

@@ -5,27 +5,6 @@ import maplibregl from "maplibre-gl";
 // Map colour: blue = positive, red = negative, neutral grey at zero. Coherence uses one hue.
 const POS = [59, 130, 214], NEG = [217, 83, 74], MID = [120, 120, 116];
 // Chart series colours (fixed by entity): NISAR blue, Sentinel-1 orange, GPS light grey.
-// What the real runs showed. Written by hand from the numbers computed on 2026-11-14; update these if a site is re-run.
-const FINDINGS = [
-  { site: "portuguese-bend", place: "Portuguese Bend, California", what: "A coastal landslide",
-    big: "about 1.3 m", bigNote: "the fastest spot sank, 5 Dec 2025 to 13 Oct 2026",
-    points: ["The slide core sank about 52 cm (the middle value of 308 points).",
-      "It moved about 6 cm a month in the wet winter and about 3.5 by autumn.",
-      "NISAR got a usable reading on 72% and 61% of passes over the slide. Sentinel-1 got 46% and 44%."],
-    sure: "Checked against GPS off the slide (2.2 cm apart on average). No ground measurement on the slide itself, so 1.3 m is unconfirmed." },
-  { site: "central-valley", place: "Central Valley, California", what: "Farmland over pumped groundwater",
-    big: "about 33 cm", bigNote: "the deepest spot sank, 30 Nov 2025 to 8 Oct 2026",
-    points: ["A GPS station rose about 3 cm through the wet winter, then sank about 9 cm from late February to October.",
-      "The middle of the study box sank about 9 cm.",
-      "On open farmland the two radars did about equally well: NISAR 90% and 89% of passes, Sentinel-1 82% and 86%."],
-    sure: "The first run disagreed with GPS by up to 15 cm, so the map is pinned to that GPS station. East-west motion is left out here." },
-  { site: "destin", place: "Destin, Florida", what: "Hurricane Isaias, 9 October 2026",
-    big: "0.25 to 0.16", bigNote: "average signal quality, calm passes to the storm pass (other direction: 0.37 to 0.23)",
-    points: ["Both viewing directions lost signal in the pass that spans landfall.",
-      "They disagree on where. Only one shows strong change on the barrier island.",
-      "Only 34% of the area gives a reading at all. The rest is water or ground the radar could not follow."],
-    sure: "This shows the storm passing, not a damage map. Five passes per direction is a thin baseline." },
-];
 const C = { nisar: "#3987e5", s1: "#d95926", gps: "#c3c2b7", asc: "#199e70", desc: "#9085e9" };
 // One colour per radar band, checked for colour-blind separation on the dark panel. L and C keep the colours NISAR and Sentinel-1 use everywhere else.
 const BANDS = [
@@ -113,16 +92,20 @@ export default function Page() {
   const [sig, setSig] = useState(null);         // per-pass signal quality arrays {asc, desc}
   const [tour, setTour] = useState(null);       // {i, auto} while the guided tour runs
   const [copied, setCopied] = useState(false);
-  const DEFAULTS = { base: "sat", view3d: false, contours: true, labels: true, smooth: true, boxes: true, stations: true, inches: false, speed: "normal", tall: "medium", clouds: true, strength: 0.62 };
+  const DEFAULTS = { base: "sat", view3d: true, contours: true, labels: true, smooth: true, boxes: true, stations: true, inches: false, speed: "normal", tall: "medium", clouds: true, strength: 0.62 };
   const [opt, setOpt] = useState(DEFAULTS);
   const [showSettings, setShowSettings] = useState(false);
-  useEffect(() => { try { const o = JSON.parse(window.localStorage.getItem("sarvis-options") || "null"); if (o) setOpt({ ...DEFAULTS, ...o, view3d: false }); } catch {} }, []);
+  useEffect(() => { try { const o = JSON.parse(window.localStorage.getItem("sarvis-options") || "null"); if (o) setOpt({ ...DEFAULTS, ...o, view3d: true }); } catch {} }, []);
   const set = (patch) => setOpt((o) => { const n = { ...o, ...patch }; try { window.localStorage.setItem("sarvis-options", JSON.stringify(n)); } catch {} return n; });
   const base = opt.base, setBase = (b) => set({ base: b });
   const uf = opt.inches ? 1 / 2.54 : 1, un = opt.inches ? "in" : "cm";      // data stay in cm; only the display converts
   const [notesOpen, setNotesOpen] = useState(false);
   const [sheet, setSheet] = useState("peek");   // footer height: peek, half or full
   const [dragH, setDragH] = useState(null);
+  const [siteMenu, setSiteMenu] = useState(false);
+  // every sentence in the Findings tab is worked out from the data by pipeline/findings.py
+  const [found, setFound] = useState(null);
+  useEffect(() => { fetch("data/findings.json").then((r) => (r.ok ? r.json() : null)).then(setFound).catch(() => {}); }, []);
   const [tab, setTab] = useState("view");
   const sheetEl = useRef(null), bodyEl = useRef(null);
   useEffect(() => { if (bodyEl.current) bodyEl.current.scrollTop = 0; }, [tab, pick?.i, pick?.j, siteId]);
@@ -428,7 +411,7 @@ export default function Page() {
       { title: "The most changed spot", layer: main, pick: "hot", point: "hot", label: "Most changed", glow: "pickcard",
         say: (d) => d.hot ? `Here the radar lost ${Math.round(100 * d.hot.v)}% of its usual signal. In the chart, the lines stay level through the calm passes, then drop at the yellow storm line.` : "Finding the most changed spot…" },
       { title: "Line it up with the weather", layer: main, pick: "hot", point: "hot", label: "Same spot", glow: "weather",
-        say: (d) => `The rain and wind charts carry the same yellow line. ${d.share !== null ? `Across the yellow box, ${Math.round(100 * d.share)}% of the ground changed by more than 30%. ` : ""}${meta.finding ? `${meta.finding} ` : ""}Pink means changed, not destroyed: tides and wet soil count too.` },
+        say: (d) => `The rain and wind charts carry the same yellow line. ${d.share !== null ? `Across the yellow box, ${Math.round(100 * d.share)}% of the ground changed by more than 30%. ` : ""}${found?.sites?.[meta.id]?.conclusion ? `${found.sites[meta.id].conclusion} ` : ""}Pink means changed, not destroyed: tides and wet soil count too.` },
     ];
     return [
       { title: "Watch it move", layer: "up", mode: "total", play: true, glow: "timebar", tab: "about",
@@ -436,7 +419,7 @@ export default function Page() {
       { title: "The fastest spot", layer: "up", mode: "total", pick: "hot", point: "hot", label: "Moved the most", glow: "pickcard",
         say: (d) => d.hot ? `This spot went ${d.hot.v < 0 ? "down" : "up"} ${cm(d.hot.v)} between ${fmtDate(d.layer.dates[0])} and ${fmtDate(d.layer.dates[d.layer.dates.length - 1])}. Each dot on the chart is one satellite pass.` : "Finding the fastest spot…" },
       { title: "Speed and rain", layer: "up", mode: "speed", pick: "hot", point: "hot", label: "Same spot, now speed", glow: "weather",
-        say: () => `Now the chart shows speed in cm per month, with the rainfall bars below it. ${meta.finding || "Compare its peaks with the rain."}` },
+        say: () => `Now the chart shows speed in cm per month, with the rainfall bars below it. ${found?.sites?.[meta.id]?.conclusion || "Compare its peaks with the rain."}` },
       ...(hasS1 ? [{ title: "Old radar, new radar", layer: "s1_up", mode: "total", point: "box", label: "Blank = no reading", glow: "coverage",
         say: (d) => { const a = lo(d.cov?.nisar), c = lo(d.cov?.s1); return `This is Sentinel-1, whose 5.5 cm wavelength is a quarter of NISAR's.${a !== null && c !== null ? ` Over the same weeks it got a usable reading in the yellow box on ${Math.round(100 * c)}% of passes; NISAR managed ${Math.round(100 * a)}%.` : ""}`; } }] : []),
       ...(st ? [{ title: "Checked on the ground", layer: "up", mode: "total", station: st, point: "station", label: `GPS ${st.id}`, glow: "pickcard", notes: true,
@@ -537,6 +520,8 @@ export default function Page() {
   const TERRAIN_X = 1.5;
 const CLOUD_BASE_M = 1000;    // lowest cloud layer height above sea level, before the same vertical stretch as the land. Illustrative, not measured:
                               // the layer is raised when needed so it stays above the default 3D camera.
+const KEYWORD = { down: "sank", up: "rose" };
+const PEEK = 148;             // height of the footer when it is down, in pixels (matches .sheet --h in the stylesheet)
 const IMPACT_TOP = 0.5;      // storm-change colour is full strength where the radar lost half its usual signal or more
 const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wind speed, so the movement is visible
   const camAlt3d = useRef(0); const zoom3d = useRef(0); const [cam3d, setCam3d] = useState(0);
@@ -770,27 +755,54 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   const onGrabUp = () => {
     const g = grab.current; grab.current = null; if (!g) return;
     if (!g.moved) { setSheet((v) => (v === "peek" ? "half" : v === "half" ? "full" : "peek")); return; }
-    const h = sheetEl.current.offsetHeight, vh = window.innerHeight, snaps = [["peek", 176], ["half", vh * 0.52], ["full", vh * 0.88]];
+    const h = sheetEl.current.offsetHeight, vh = window.innerHeight, snaps = [["peek", PEEK], ["half", vh * 0.52], ["full", vh * 0.88]];
     setSheet(snaps.reduce((a, b) => (Math.abs(b[1] - h) < Math.abs(a[1] - h) ? b : a))[0]); setDragH(null);
   };
 
   return (
-    <div className="stage">
+    <div className="stage" style={{ "--sheet-h": dragH !== null ? `${dragH}px` : sheet === "peek" ? `${PEEK}px` : sheet === "half" ? "52dvh" : "88dvh" }} onClick={(e) => { if (siteMenu && !e.target.closest(".sitepick")) setSiteMenu(false); }}>
       <div className="map"><div ref={mapDiv} /></div>
       <div className="topbar">
-        <div className="brandchip"><span className="mark" aria-hidden="true" /><b>SARvis</b>{meta && <span className="sitename">{meta.short}</span>}</div>
+        <div className="sitepick">
+          <button className="brandchip" aria-haspopup="listbox" aria-expanded={siteMenu} onClick={() => setSiteMenu((v) => !v)}>{meta ? meta.short : "Loading"}<span className="caret" aria-hidden="true" /></button>
+          {siteMenu && (
+            <div className="sitemenu" role="listbox" aria-label="Choose a place">
+              {sites.map((st) => <button key={st.id} role="option" aria-selected={st.id === siteId} className={st.id === siteId ? "on" : ""} onClick={() => { setSiteMenu(false); setTour(null); setSiteId(st.id); }}>{st.short || st.id}</button>)}
+            </div>)}
+        </div>
         <div className="topbtns">
+          {meta && layer && (
+            <div className="seg dim" aria-label="Flat map or 3D">
+              <button className={!opt.view3d ? "on" : ""} aria-pressed={!opt.view3d} onClick={() => set({ view3d: false })}>2D</button>
+              <button className={opt.view3d ? "on" : ""} aria-pressed={opt.view3d} disabled={!bars3d} onClick={() => { setTour(null); set({ view3d: true }); }}>3D</button>
+            </div>)}
           {meta && layer && <button className="ghost wide" onClick={() => { setTour(null); setTab("found"); setSheet("full"); }}>What we found</button>}
           {meta && layer && <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Tour</button>}
           <button className="ghost" aria-expanded={showSettings} onClick={() => setShowSettings(true)}>Settings</button>
         </div>
       </div>
+      {meta && layer && !step && (
+        <div className="key" aria-label="Colour key">
+          {!layer.static ? (<>
+            <div className="keyends"><span><i style={{ background: "#d0303a" }} />{KEYWORD[ends?.[0]] || ends?.[0] || "sank"}</span><span>{KEYWORD[ends?.[1]] || ends?.[1] || "rose"}<i style={{ background: "#2f6fd6" }} /></span></div>
+            <div className="ramp" style={{ background: `linear-gradient(90deg, ${css([...RAMP.neg].reverse().map(([t, c]) => [(1 - t) / 2, c]))}, rgba(120,120,116,0.25) 50%, ${css(RAMP.pos.map(([t, c]) => [0.5 + t / 2, c]))})` }} />
+            <div className="keyends num"><span>−{(lim * uf).toFixed(1)} {unit}</span><span>0</span><span>+{(lim * uf).toFixed(1)} {unit}</span></div>
+          </>) : isImpact ? (<>
+            <div className="keyends"><span>no change</span><span>changed</span></div>
+            <div className="ramp" style={{ background: `linear-gradient(90deg, rgba(246,200,216,0.08), ${css(RAMP.impact)})` }} />
+            <div className="keyends num"><span>0%</span><span>{Math.round(100 * IMPACT_TOP)}% of signal lost, or more</span></div>
+          </>) : (<>
+            <div className="keyends"><span>signal lost</span><span>stable signal</span></div>
+            <div className="ramp" style={{ background: "linear-gradient(90deg, rgb(20,24,32), rgb(150,200,255))" }} />
+            <div className="keyends num"><span>0</span><span>1</span></div>
+          </>)}
+        </div>)}
       {meta?.synthetic && <div className="demochip"><b>Demo data.</b> Radar layers are synthetic.</div>}
       {meta && layer && !pick && grid && !step && sheet === "peek" && <div className="hint">Tap the map to read one spot</div>}
       {showSettings && (
         <div className="modal" onClick={() => setShowSettings(false)}>
           <div className="card settings" role="dialog" aria-label="Settings" onClick={(e) => e.stopPropagation()}>
-            <div className="shead"><h2>Settings</h2><button className="ghost small" onClick={() => setShowSettings(false)}>Done</button></div>
+            <div className="shead"><h2>SARvis <span className="muted" style={{ fontWeight: 400 }}>settings</span></h2><button className="ghost small" onClick={() => setShowSettings(false)}>Done</button></div>
             <h3>On the map</h3>
             <Toggle label="Smooth shading" hint="Off shows the raw 80 m pixels" on={opt.smooth} onChange={(v) => set({ smooth: v })} />
             <Toggle label="Contour lines" on={opt.contours} onChange={(v) => set({ contours: v })} />
@@ -821,15 +833,12 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
                 <div className="tdate"><span className="muted">{speed ? "speed around" : `since ${fmtDate(layer.dates[0])}`}</span><b>{fmtDate(layer.dates[t])}</b></div>
                 <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
               </div>
-              <div className="ramp" style={{ background: `linear-gradient(90deg, ${css([...RAMP.neg].reverse().map(([t, c]) => [(1 - t) / 2, c]))}, rgba(120,120,116,0.25) 50%, ${css(RAMP.pos.map(([t, c]) => [0.5 + t / 2, c]))})` }} />
-              <div className="row"><span>−{(lim * uf).toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span className="blank">{opt.view3d && bars3d ? `column: 1 ${un} of change = ${Math.round((mPerCm / uf) * 10) / 10} m · land height ×${TERRAIN_X}${opt.clouds && cloudPct !== null ? ` · sky ${Math.round(cloudPct)}% cloud that day` : ""}` : `${opt.contours ? `lines every ${Math.round(contourStep * uf * 100) / 100} ${unit} · ` : ""}see-through = no reading`}</span><span>+{(lim * uf).toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
+              <div className="row cap"><span>{opt.view3d && bars3d ? `column: 1 ${un} of change = ${Math.round((mPerCm / uf) * 10) / 10} m · land height ×${TERRAIN_X}${opt.clouds && cloudPct !== null ? ` · sky ${Math.round(cloudPct)}% cloud that day` : ""}` : `${opt.contours ? `lines every ${Math.round(contourStep * uf * 100) / 100} ${unit} · ` : ""}see-through = no reading`}</span></div>
             </>) : isImpact ? (<>
               <div className="trow one"><div className="tdate"><span className="muted">before and after</span><b>{meta.event?.name || "Event"}</b></div></div>
-              <div className="ramp" style={{ background: `linear-gradient(90deg, rgba(246,200,216,0.08), ${css(RAMP.impact)})` }} />
-              <div className="row"><span>no change</span><span className="blank">see-through = no reading</span><span>lost {Math.round(100 * IMPACT_TOP)}% of signal or more</span></div>
+              <div className="row cap"><span>see-through = no reading</span></div>
             </>) : (<>
-              <div className="ramp" style={{ background: "linear-gradient(90deg, rgb(20,24,32), rgb(150,200,255))" }} />
-              <div className="row"><span>0 signal lost</span><span>1 stable signal</span></div>
+              <div className="row cap"><span>how well the radar could follow the ground, averaged over all passes</span></div>
             </>)}
           </div>
         )}
@@ -857,12 +866,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
           </div>
         )}
         {meta && layer && tab === "view" && (
-          <div className="pane" key={"view" + meta.id}>
-            <div><label>Site</label>
-        <div className="seg" role="tablist" aria-label="Site">
-          {sites.map((st) => <button key={st.id} role="tab" aria-selected={st.id === siteId} className={"tab" + (st.id === siteId ? " on" : "")} onClick={() => setSiteId(st.id)}>{st.short || st.id}</button>)}
-        </div>
-            </div>
+          <div className="pane viewpane" key={"view" + meta.id}>
           <div>
             <label>Sensor</label>
             <div className="seg">
@@ -884,10 +888,6 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
               <button className={speed ? "on" : ""} aria-pressed={speed} onClick={() => setMode("speed")}>Speed</button>
             </div>
           )}
-              <div className="seg" aria-label="Flat or 3D">
-                <button className={!opt.view3d ? "on" : ""} aria-pressed={!opt.view3d} onClick={() => set({ view3d: false })}>Flat</button>
-                <button className={opt.view3d ? "on" : ""} aria-pressed={opt.view3d} disabled={!bars3d} onClick={() => { setTour(null); set({ view3d: true }); }}>3D terrain</button>
-              </div>
               <label className="strength"><span>Colour strength <b>{Math.round(opt.strength * 100)}%</b></span>
                 <input type="range" min="20" max="100" step="2" value={Math.round(opt.strength * 100)} onChange={(e) => set({ strength: +e.target.value / 100 })} aria-label="How strongly the radar colours cover the map" /></label>
               <div className="seg" aria-label="Background">
@@ -1010,19 +1010,22 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         )}
         {meta && layer && tab === "found" && !step && (
           <div className="pane" id="found">
-            <p className="muted" style={{ margin: "0 0 12px" }}>Three places, measured from space with NASA's NISAR radar. Every number below comes from real data processed for this project.</p>
-            <div className="found">
-              {FINDINGS.map((f) => (
-                <div key={f.site} className={"card finding" + (f.site === siteId ? " here" : "")}>
-                  <div className="muted">{f.what}</div>
-                  <h2>{f.place}</h2>
-                  <div className="hero">{f.big}</div>
-                  <div className="muted heronote">{f.bigNote}</div>
-                  <ul>{f.points.map((x, k) => <li key={k}>{x}</li>)}</ul>
-                  <p className="sure"><b>How sure:</b> {f.sure}</p>
-                  <button className="ghost" onClick={() => { if (f.site !== siteId) setSiteId(f.site); setSheet("peek"); }}>{f.site === siteId ? "Back to the map" : "Show me"}</button>
-                </div>))}
-            </div>
+            {!found ? <p className="muted">Loading the findings.</p> : (<>
+              <p className="overall">{found.overall}</p>
+              <div className="found">
+                {sites.filter((st) => found.sites[st.id]).map((st) => { const f = found.sites[st.id]; return (
+                  <div key={st.id} className={"card finding" + (st.id === siteId ? " here" : "")}>
+                    <h2>{f.place}</h2>
+                    <div className="hero">{f.big}</div>
+                    <div className="muted heronote">{f.big_note}</div>
+                    <p className="conclusion">{f.conclusion}</p>
+                    <ul>{f.points.map((x, k) => <li key={k}>{x}</li>)}</ul>
+                    <p className="sure"><b>How sure:</b> {f.sure}</p>
+                    <button className="ghost" onClick={() => { if (st.id !== siteId) setSiteId(st.id); setSheet("peek"); }}>{st.id === siteId ? "Back to the map" : "Show me"}</button>
+                  </div>); })}
+              </div>
+              <p className="muted" style={{ margin: "12px 0 0" }}>Worked out from the data files on {found.generated} by <code>pipeline/findings.py</code>. Nothing here is typed in by hand.</p>
+            </>)}
           </div>
         )}
         {meta && layer && tab === "about" && (

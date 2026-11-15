@@ -69,3 +69,7 @@ that folder are real. Replace the folder contents with pipeline output.
 - Rainfall: NASA POWER (MERRA-2). GPS: Nevada Geodetic Laboratory daily solutions.
 - Background map: OpenFreeMap (OpenMapTiles, OpenStreetMap contributors). Satellite imagery: USGS The National Map.
   Terrain heights for the slice view: Mapzen terrain tiles (AWS Open Data). Map library: MapLibre GL JS.
+
+## Findings
+
+The Findings tab is generated, not written by hand. `python pipeline/findings.py app/public/data` reads each site's data and writes `app/public/data/findings.json` with every number, date and sentence the tab shows. Re-run it after any site's data changes.

@@ -27,6 +27,18 @@ const ramp = (stops, v) => { for (let k = 1; k < stops.length; k++) if (v <= sto
 const css = (stops) => stops.map(([t, c]) => `rgb(${c}) ${Math.round(t * 100)}%`).join(", ");
 const niceStep = (x) => { const p = Math.pow(10, Math.floor(Math.log10(x))), m = x / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; };
 // Draw a value grid (NaN = no reading) onto a canvas at S times the resolution, blending between pixel centres.
+// For display only: fill pinholes (a missing pixel with at least 5 of its 8 neighbours present) and blend each pixel a little
+// with its neighbours, so a field-by-field patchwork reads as a surface. Values you tap are still the unsmoothed data.
+function soften(vals, nx, ny) {
+  let a = vals;
+  for (let pass = 0; pass < 2; pass++) { const b = new Float32Array(a.length);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { let sum = 0, n = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { if (!di && !dj) continue; const x = i + di, y = j + dj; if (x < 0 || y < 0 || x >= nx || y >= ny) continue; const v = a[y * nx + x]; if (v === v) { sum += v; n++; } }
+      const v = a[j * nx + i];
+      b[j * nx + i] = v === v ? (n ? 0.5 * v + 0.5 * (sum / n) : v) : n >= 5 ? sum / n : NaN; }
+    a = b; }
+  return a;
+}
 function drawField(c, vals, nx, ny, color, contour, smooth = true) {
   const S = !smooth ? 1 : nx * ny > 90000 ? 2 : 3, W = nx * S, H = ny * S;
   c.width = W; c.height = H;
@@ -289,7 +301,7 @@ export default function Page() {
     const color = layer.static
       ? (layer.palette === "impact" ? (v) => { const q = Math.min(1, v / IMPACT_TOP); return [...ramp(RAMP.impact, q), Math.min(235, 255 * Math.max(0, q - 0.06) * 1.7)]; } : (v) => [...ramp(RAMP.coh, v), 215])
       : (v) => { const m = Math.min(1, Math.abs(v)); return [...ramp(v < 0 ? RAMP.neg : RAMP.pos, m), Math.min(232, 255 * Math.max(0, m - 0.1) * 2.3)]; };
-    drawField(c, vals, nx, ny, color, layer.static || !opt.contours ? 0 : contourStep / lim, opt.smooth);
+    drawField(c, meta.soften && opt.smooth ? soften(vals, nx, ny) : vals, nx, ny, color, layer.static || !opt.contours ? 0 : contourStep / lim, opt.smooth);
     if (map.current.getLayer("sar")) { map.current.setPaintProperty("sar", "raster-resampling", opt.smooth ? "linear" : "nearest"); map.current.setPaintProperty("sar", "raster-opacity", opt.strength * riseK.current); }
     // A canvas source repaints straight from the canvas: no image decode, no aborted loads while scrubbing.
     const [w, s, e, n] = meta.bbox, coords = [[w, n], [e, n], [e, s], [w, s]], m = map.current;
@@ -561,7 +573,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       else { m.addSource("bars", { type: "geojson", data: fc });
         m.addLayer({ id: "bars", type: "fill-extrusion", source: "bars", paint: { "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["*", ["get", "h"], riseK.current], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": true } }, top.current); } };
     if (!on) { colsRef.current = []; setColsVer((v) => v + 1); push(); return; }
-    const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 800)));       // about 800 blocks at most, so the land stays visible between columns
+    const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 420)));       // about 420 blocks at most, so the land stays visible between columns
     const widthM = (e - w) * 111320 * Math.cos((((s + n) / 2) * Math.PI) / 180), impactTop = widthM * 0.018 * { low: 0.5, medium: 1, high: 2 }[opt.tall];
     const dx = (e - w) / nx, dy = (n - s) / ny, cols = [];
     for (let j = 0; j < ny; j += B) for (let i = 0; i < nx; i += B) {
@@ -604,6 +616,15 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     draw(); m.on("moveend", draw);
     return () => { m.off("moveend", draw); clear(); };
   }, [ready, opt.view3d, opt.labels, colsVer, cam3d]);
+  // Some places need their own background picture (at Destin the public aerial imagery is blacked out over a military base).
+  useEffect(() => {
+    const m = map.current; if (!m || !ready || !meta) return;
+    const ids = (meta.backdrops || []).map((_, k) => `backdrop${k}`);
+    (meta.backdrops || []).forEach((bd, k) => { const [w, s, e, n] = bd.bbox;
+      m.addSource(ids[k], { type: "image", url: `data/${meta.id}/${bd.file}`, coordinates: [[w, n], [e, n], [e, s], [w, s]] });
+      m.addLayer({ id: ids[k], type: "raster", source: ids[k], paint: { "raster-opacity": base === "sat" ? 1 : 0, "raster-opacity-transition": { duration: 900, delay: 0 }, "raster-fade-duration": 0, "raster-saturation": 0.08, "raster-contrast": 0.08 } }, m.getLayer("relief") ? "relief" : top.current); });
+    return () => ids.forEach((id) => { if (m.getLayer(id)) m.removeLayer(id); if (m.getSource(id)) m.removeSource(id); });
+  }, [ready, meta?.id, base]);
   // Arriving at a place: the colours and columns are held back while the camera travels, then the colour washes in and the columns rise.
   const riseK = useRef(1), riseRaf = useRef(0);
   const setRise = (m, k) => { riseK.current = k;
@@ -628,7 +649,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       if (!m.getSource("dem")) m.addSource("dem", { type: "raster-dem", tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: 256, maxzoom: 14, attribution: "Terrain: Mapzen, AWS Open Data" });
       m.setTerrain({ source: "dem", exaggeration: TERRAIN_X });
       m.dragRotate.enable(); m.touchZoomRotate.enableRotation();
-      const f = meta.focus_box || meta.bbox, cam = m.cameraForBounds([[f[0], f[1]], [f[2], f[3]]], { padding: { top: 90, bottom: 230, left: 30, right: 30 } });
+      const f = (meta.event ? null : meta.focus_box) || meta.bbox, cam = m.cameraForBounds([[f[0], f[1]], [f[2], f[3]]], { padding: { top: 90, bottom: 230, left: 30, right: 30 } });
       const z3 = Math.min((cam?.zoom ?? 12) + 0.35, 15.5), latc = (f[1] + f[3]) / 2;
       // how high the camera ends up in this view (metres): the cloud layer is kept above it, so you look along its underside
       camAlt3d.current = Math.cos((77 * Math.PI) / 180) * ((m.getContainer().clientHeight / 2) / Math.tan((36.87 / 2) * Math.PI / 180)) * ((40075016.686 * Math.cos((latc * Math.PI) / 180)) / (512 * 2 ** z3)) + 400;
@@ -920,7 +941,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
           <div className="card settings" role="dialog" aria-label="Settings" onClick={(e) => e.stopPropagation()}>
             <div className="shead"><h2>SARvis <span className="muted" style={{ fontWeight: 400 }}>settings</span></h2><button className="ghost small" onClick={() => setShowSettings(false)}>Done</button></div>
             <h3>On the map</h3>
-            <Toggle label="Smooth shading" hint="Off shows the raw 80 m pixels" on={opt.smooth} onChange={(v) => set({ smooth: v })} />
+            <Toggle label="Smooth shading" hint="Off shows the raw pixels. In the Central Valley, on also fills pinholes for display" on={opt.smooth} onChange={(v) => set({ smooth: v })} />
             <Toggle label="Contour lines" on={opt.contours} onChange={(v) => set({ contours: v })} />
             <Toggle label="Number labels" on={opt.labels} onChange={(v) => set({ labels: v })} />
             <Toggle label="Reference and focus boxes" on={opt.boxes} onChange={(v) => set({ boxes: v })} />
@@ -1147,6 +1168,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         )}
         {meta && layer && tab === "about" && (
           <div className="pane" key="about">
+            {meta.backdrop_credit && <div className="card"><h2>Background picture here</h2><p className="muted" style={{ margin: 0 }}>{meta.backdrop_credit}</p></div>}
         {meta && (
           <div className="story" key={meta.id}>
             <div><b>{meta.name}</b><p>{meta.story}</p>{meta.event && <p className="muted">{meta.event.name}, {meta.event.when}. {meta.event.note}</p>}</div>

@@ -362,3 +362,10 @@ button.brandchip { color: var(--ink); font-weight: 600; cursor: pointer; gap: 8p
 @keyframes pinpulse { to { box-shadow: 0 0 0 14px rgba(237,161,0,0); } }
 @media (prefers-reduced-motion: reduce) { .sitepin i { animation: none; } }
 .far .station, .far .vlabel, .far .hint, .far .readout-at { display: none; }
+
+/* phone: the spot readout is pinned just above the colour key, full width, always on screen */
+.readout-fixed { position: absolute; left: 8px; right: 8px; bottom: min(calc(var(--sheet-h) + 86px), calc(100dvh - 240px)); z-index: 6; }
+.readout-fixed .readout { max-width: none; min-width: 0; padding: 9px 11px 8px; }
+.readout-fixed .rd-big { font-size: 22px; }
+.readout-fixed .rd-top { white-space: normal; }
+.far .readout-fixed { display: none; }

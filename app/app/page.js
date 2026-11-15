@@ -755,10 +755,10 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
 
   // In 3D the camera slowly circles the place. Touching the map pauses it; it picks up again a few seconds after you let go.
   useEffect(() => {
-    const m = map.current; if (!m || !ready || !opt.view3d || !opt.orbit || tour || showSettings) return;
+    const m = map.current; if (!m || !ready || !opt.view3d || !opt.orbit || tour || showSettings || pick) return;      // it also holds still while a spot readout is open
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let timer = 0, held = false, live = true;
-    const go = () => { if (!live || held) return; if (m.getZoom() < GLOBE_ABOVE) { later(4000); return; } m.easeTo({ bearing: m.getBearing() + 120, duration: 60000, easing: (x) => x }, { orbit: true }); };      // 2 degrees a second
+    const go = () => { if (!live || held) return; if (m.getZoom() < GLOBE_ABOVE) { later(4000); return; } m.easeTo({ bearing: m.getBearing() + 120, duration: 110000, easing: (x) => x }, { orbit: true }); };      // about 1 degree a second
     const later = (ms) => { clearTimeout(timer); timer = setTimeout(go, ms); };
     const hold = () => { held = true; clearTimeout(timer); }, release = () => { held = false; later(5000); };
     const onEnd = (e) => { if (held) return; if (e.orbit) go(); else later(4000); };
@@ -766,7 +766,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     el.addEventListener("pointerdown", hold); el.addEventListener("wheel", () => { hold(); release(); }, { passive: true }); window.addEventListener("pointerup", release);
     m.on("moveend", onEnd); later(2500);
     return () => { live = false; clearTimeout(timer); m.off("moveend", onEnd); el.removeEventListener("pointerdown", hold); window.removeEventListener("pointerup", release); m.stop(); };
-  }, [ready, opt.view3d, opt.orbit, tour, showSettings, siteId]);
+  }, [ready, opt.view3d, opt.orbit, tour, showSettings, siteId, !!pick]);
 
   // Readout beside the spot you pressed: the numbers resolve out of ones and zeros, like a digital display.
   const readout = useRef(null);
@@ -796,16 +796,20 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches || readoutFor.current === `${pick.i},${pick.j}`;
     readoutFor.current = `${pick.i},${pick.j}`;
     let raf = 0;
-    if (!still) { const targets = [[bigEl, big], [subEl, sub]], t0 = performance.now(), dur = 620;
+    if (!still) { const targets = [[bigEl, big], [subEl, sub]], t0 = performance.now(), dur = 1500;
       const tick = (now) => { const f = Math.min(1, (now - t0) / dur);
         for (const [node, text] of targets) { const done = Math.floor(f * text.length); let out = text.slice(0, done);
           for (let k = done; k < text.length; k++) out += text[k] === " " ? " " : Math.random() < 0.5 ? "0" : "1";
           node.textContent = out; }
         if (f < 1) raf = requestAnimationFrame(tick); };
       raf = requestAnimationFrame(tick); }
-    const left = pt.x > W - 250, up = pt.y < 210;
-    const holder = document.createElement("div"); holder.className = "readout-at"; holder.appendChild(el);      // the map moves the holder; the card inside does its own entrance
-    readout.current = new maplibregl.Marker({ element: holder, anchor: `${up ? "top" : "bottom"}-${left ? "right" : "left"}`, offset: [left ? -12 : 12, up ? 12 : -12] }).setLngLat([lon, lat]).addTo(m);
+    const holder = document.createElement("div"); holder.appendChild(el);      // the holder is positioned; the card inside does its own entrance
+    if (W <= 800) {                                                            // on a phone the card is pinned to the screen, so it always fits whatever the map does
+      holder.className = "readout-fixed"; m.getContainer().closest(".stage").appendChild(holder); readout.current = { remove: () => holder.remove() };
+    } else {
+      const left = pt.x > W - 270, up = pt.y < 230; holder.className = "readout-at";
+      readout.current = new maplibregl.Marker({ element: holder, anchor: `${up ? "top" : "bottom"}-${left ? "right" : "left"}`, offset: [left ? -12 : 12, up ? 12 : -12] }).setLngLat([lon, lat]).addTo(m);
+    }
     return () => cancelAnimationFrame(raf);
   }, [ready, meta, layerKey, grid, pick, t, mode, opt.inches, tour]);
   useEffect(() => () => { readout.current?.remove(); }, []);

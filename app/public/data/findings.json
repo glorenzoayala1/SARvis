@@ -193,6 +193,74 @@
     },
     "area_with_reading": 0.335
    }
+  },
+  "semarang": {
+   "place": "Semarang subsidence, Indonesia",
+   "kind": "first_look",
+   "big": "6 cm",
+   "big_note": "the most-changed area sank, 25 Jun 2026 to 29 Sep 2026",
+   "conclusion": "A first look: over 96 days the ground here sank by about 6 cm in its most-changed area, steadily and in both viewing directions.",
+   "points": [
+    "Between 25 Jun 2026 and 29 Sep 2026 (96 days) the most-changed 1% of the area sank 5.9 cm (middle value, after averaging over about 500 m).",
+    "That area moved the same way in 7 of its 7 steps between passes.",
+    "The two viewing directions agree on where the ground moved with a correlation of 0.64 (1 would be perfect agreement, 0 none).",
+    "NISAR got a usable reading in the study box on 75% and 74% of passes (its two directions)."
+   ],
+   "sure": "First look only. About four months of data, no GPS station, no second radar, and the stable reference area was chosen from a map, not from local knowledge. Changes of a few centimetres are close to the noise in this record.",
+   "numbers": {
+    "from": "20260625",
+    "to": "20260929",
+    "days": 96,
+    "direction": "sank",
+    "most_changed_1pct_cm": -5.9,
+    "steps_same_way": [
+     7,
+     7
+    ],
+    "directions_agreement": 0.64,
+    "centre": [
+     -6.9832,
+     110.3981
+    ],
+    "coverage": {
+     "asc": 0.75,
+     "desc": 0.742
+    }
+   }
+  },
+  "campi-flegrei": {
+   "place": "Campi Flegrei, Italy",
+   "kind": "first_look",
+   "big": "3 cm",
+   "big_note": "the most-changed area rose, 24 Jun 2026 to 10 Oct 2026",
+   "conclusion": "A first look: over 108 days the ground here rose by about 3 cm in its most-changed area, but the two viewing directions only partly agree, so treat the pattern as tentative.",
+   "points": [
+    "Between 24 Jun 2026 and 10 Oct 2026 (108 days) the most-changed 1% of the area rose 2.7 cm (middle value, after averaging over about 500 m).",
+    "That area moved the same way in 5 of its 8 steps between passes.",
+    "The two viewing directions agree on where the ground moved with a correlation of 0.18 (1 would be perfect agreement, 0 none).",
+    "NISAR got a usable reading in the study box on 52% and 50% of passes (its two directions)."
+   ],
+   "sure": "First look only. About four months of data, no GPS station, no second radar, and the stable reference area was chosen from a map, not from local knowledge. Changes of a few centimetres are close to the noise in this record.",
+   "numbers": {
+    "from": "20260624",
+    "to": "20261010",
+    "days": 108,
+    "direction": "rose",
+    "most_changed_1pct_cm": 2.7,
+    "steps_same_way": [
+     5,
+     8
+    ],
+    "directions_agreement": 0.18,
+    "centre": [
+     40.8322,
+     14.1156
+    ],
+    "coverage": {
+     "asc": 0.521,
+     "desc": 0.497
+    }
+   }
   }
  },
  "overall": "In under a year of data, NISAR measured a landslide that sank up to 1.3 m, farmland that sank up to 33 cm, and a hurricane landfall that showed up as a loss of signal. Against Sentinel-1, its advantage was large on the steep, vegetated slide (22 percentage points more passes with a reading) and small on open farmland (5 points)."

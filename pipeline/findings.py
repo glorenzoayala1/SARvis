@@ -83,11 +83,43 @@ def motion_site(folder, meta, ctx):
         n["nisar_minus_s1"] = round((na + nd - sa - sd) / 2, 3)
     return n, big, f"the fastest spot sank, {nice(d[0])} to {nice(d[-1])}", points, month(*fast), month(*slow)
 
+def box_smooth(x, k=7):
+    """mean over a k x k window, ignoring missing pixels; missing where under half the window has data"""
+    ok = np.isfinite(x).astype(float); v = np.where(ok > 0, x, 0.0); pad = k // 2
+    def win(z):
+        z = np.pad(z, pad); c = np.cumsum(np.cumsum(z, 0), 1); c = np.pad(c, ((1, 0), (1, 0)))
+        return c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]
+    n = win(ok); return np.where(n > k * k / 2, win(v) / np.maximum(n, 1), np.nan)
+
+def first_look(folder, meta, ctx):
+    L = {l["key"]: l for l in meta["layers"]}; up = grid(folder, meta, L["up"]); d = L["up"]["dates"]
+    sm = box_smooth(up[-1]); lo, hi = np.nanpercentile(sm, 1), np.nanpercentile(sm, 99)
+    rising = abs(hi) > abs(lo); core = (sm >= hi) if rising else (sm <= lo)          # the 1% of the area that changed most
+    series = np.nanmedian(up[:, core], axis=1); steps = np.diff(series); same = int((steps > 0).sum() if rising else (steps < 0).sum())
+    a, b = box_smooth(grid(folder, meta, L["asc_los"])[-1]), box_smooth(grid(folder, meta, L["desc_los"])[-1]); ok = np.isfinite(a) & np.isfinite(b)
+    agree = float(np.corrcoef(a[ok], b[ok])[0, 1]); cov = (ctx.get("coverage") or {}).get("nisar", {})
+    w, s, e, n = meta["bbox"]; jj, ii = np.where(core); lat = n - (jj.mean() + .5) * (n - s) / meta["ny"]; lon = w + (ii.mean() + .5) * (e - w) / meta["nx"]
+    word = "rose" if rising else "sank"; val = abs(float(series[-1])); days = (day(d[-1]) - day(d[0])).days
+    numbers = {"from": d[0], "to": d[-1], "days": days, "direction": word, "most_changed_1pct_cm": round(float(series[-1]), 1), "steps_same_way": [same, int(len(steps))],
+               "directions_agreement": round(agree, 2), "centre": [round(float(lat), 4), round(float(lon), 4)], "coverage": cov}
+    points = [f"Between {nice(d[0])} and {nice(d[-1])} ({days} days) the most-changed 1% of the area {word} {val:.1f} cm (middle value, after averaging over about 500 m).",
+              f"That area moved the same way in {same} of its {len(steps)} steps between passes.",
+              f"The two viewing directions agree on where the ground moved with a correlation of {agree:.2f} (1 would be perfect agreement, 0 none)."]
+    if cov: points.append(f"NISAR got a usable reading in the study box on {pct(cov.get('asc', 0))} and {pct(cov.get('desc', 0))} of passes (its two directions).")
+    strong = agree >= 0.5 and same >= len(steps) - 1
+    conclusion = (f"A first look: over {days} days the ground here {word} by about {val:.0f} cm in its most-changed area, "
+                  + ("steadily and in both viewing directions." if strong else "but the two viewing directions only partly agree, so treat the pattern as tentative."))
+    sure = ("First look only. About four months of data, no GPS station, no second radar, and the stable reference area was chosen from a map, not from local knowledge. "
+            "Changes of a few centimetres are close to the noise in this record.")
+    return {"place": meta["name"], "kind": "first_look", "big": f"{val:.0f} cm", "big_note": f"the most-changed area {word}, {nice(d[0])} to {nice(d[-1])}",
+            "conclusion": conclusion, "points": points, "sure": sure, "numbers": numbers}
+
 out = {"generated": dt.date.today().isoformat(), "sites": {}}
 for site in json.load(open(f"{root}/index.json")):
     folder = f"{root}/{site}"; meta = json.load(open(f"{folder}/meta.json")); ctx = json.load(open(f"{folder}/context.json"))
     if meta.get("synthetic"): continue                                   # never state findings from demo data
-    if meta.get("first_look"): continue                                  # first-look places are shown on the map but are not conclusions
+    if meta.get("first_look"):                                            # short record, no ground check: a card with the measured numbers and plain caveats
+        out["sites"][site] = first_look(folder, meta, ctx); continue
     if not meta.get("event"):
         n, big, note, points, fast, slow = motion_site(folder, meta, ctx)
         if meta.get("tied_to"):

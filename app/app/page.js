@@ -1247,6 +1247,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
               <div className="found">
                 {sites.filter((st) => found.sites[st.id]).map((st) => { const f = found.sites[st.id]; return (
                   <div key={st.id} className={"card finding" + (st.id === siteId ? " here" : "")}>
+                    {f.kind === "first_look" && <div className="looktag">First look</div>}
                     <h2>{f.place}</h2>
                     <div className="hero">{f.big}</div>
                     <div className="muted heronote">{f.big_note}</div>

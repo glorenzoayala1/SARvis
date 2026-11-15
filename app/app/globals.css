@@ -414,3 +414,5 @@ button.brandchip { transition: background .15s, transform .12s; } button.brandch
 
 .sitemenu button { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
 .sitemenu button small { font-size: 11.5px; font-weight: 400; color: var(--ink-3); letter-spacing: 0.02em; }
+
+.finding .looktag { align-self: flex-start; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #cfe1fb; background: rgba(59,111,181,0.25); border: 1px solid #3b6fb5; border-radius: 999px; padding: 2px 9px; margin-bottom: 4px; }

@@ -369,3 +369,12 @@ button.brandchip { color: var(--ink); font-weight: 600; cursor: pointer; gap: 8p
 .readout-fixed .rd-big { font-size: 22px; }
 .readout-fixed .rd-top { white-space: normal; }
 .far .readout-fixed { display: none; }
+
+/* phone: a smaller readout card beside the pressed spot */
+.readout-at.small .readout { min-width: 0; width: 172px; max-width: 172px; padding: 7px 9px 7px; border-radius: 9px; }
+.readout-at.small .rd-top { font-size: 8.5px; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; }
+.readout-at.small .rd-big { font-size: 19px; margin-top: 2px; }
+.readout-at.small .rd-sub { font-size: 10px; margin-top: 2px; }
+.readout-at.small .rd-bits { font-size: 8.5px; margin-top: 4px; letter-spacing: 0.02em; }
+.readout-at.small .rd-btns { margin-top: 6px; gap: 5px; }
+.readout-at.small .rd-btns button { font-size: 10px; padding: 5px 8px; }

@@ -788,7 +788,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const row = (cls, text) => { const d = document.createElement("div"); d.className = cls; d.textContent = text; el.appendChild(d); return d; };
     row("rd-top", `SPOT  ${Math.abs(lat).toFixed(4)}°${lat >= 0 ? "N" : "S"}  ${Math.abs(lon).toFixed(4)}°${lon >= 0 ? "E" : "W"}`);
     const bigEl = row("rd-big", big), subEl = row("rd-sub", sub);
-    const bitEl = row("rd-bits", bits === null ? "" : `${bits.toString(2).padStart(12, "0")}  = ${bits}${layer.static ? "" : " mm"}`);
+    const bitEl = row("rd-bits", bits === null ? "" : `${bits.toString(2).padStart(12, "0")} = ${bits}${layer.static ? "" : " mm"}`);
     const btns = document.createElement("div"); btns.className = "rd-btns"; el.appendChild(btns);
     const btn = (text, fn) => { const b = document.createElement("button"); b.textContent = text; b.onclick = (e) => { e.stopPropagation(); fn(); }; btns.appendChild(b); };
     btn("History", () => { setTab("spot"); setSheet("half"); }); btn("Close", () => setPick(null));
@@ -804,12 +804,13 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         if (f < 1) raf = requestAnimationFrame(tick); };
       raf = requestAnimationFrame(tick); }
     const holder = document.createElement("div"); holder.appendChild(el);      // the holder is positioned; the card inside does its own entrance
-    if (W <= 800) {                                                            // on a phone the card is pinned to the screen, so it always fits whatever the map does
-      holder.className = "readout-fixed"; m.getContainer().closest(".stage").appendChild(holder); readout.current = { remove: () => holder.remove() };
-    } else {
-      const left = pt.x > W - 270, up = pt.y < 230; holder.className = "readout-at";
-      readout.current = new maplibregl.Marker({ element: holder, anchor: `${up ? "top" : "bottom"}-${left ? "right" : "left"}`, offset: [left ? -12 : 12, up ? 12 : -12] }).setLngLat([lon, lat]).addTo(m);
-    }
+    // The card rides on the map beside the spot, on whichever side has room, and is kept clear of the top bar and the footer.
+    // (The camera holds still while it is open, so it stays in view.) On a phone it is a smaller card.
+    const H = m.getContainer().clientHeight, small = W <= 800, cardW = small ? 172 : 250;
+    const side = pt.x + 14 + cardW > W - 6 ? "right" : pt.x - 14 - cardW < 6 ? "left" : pt.x > W / 2 ? "right" : "left";
+    const vert = pt.y < 190 ? "top-" : pt.y > H - (small ? 330 : 260) ? "bottom-" : "";
+    holder.className = "readout-at" + (small ? " small" : "");
+    readout.current = new maplibregl.Marker({ element: holder, anchor: vert + side, offset: [side === "right" ? -14 : 14, vert === "top-" ? 10 : vert ? -10 : 0] }).setLngLat([lon, lat]).addTo(m);
     return () => cancelAnimationFrame(raf);
   }, [ready, meta, layerKey, grid, pick, t, mode, opt.inches, tour]);
   useEffect(() => () => { readout.current?.remove(); }, []);

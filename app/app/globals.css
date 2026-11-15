@@ -399,38 +399,12 @@ button.brandchip { transition: background .15s, transform .12s; } button.brandch
 
 .rd-top, .rd-bits { user-select: none; }
 
-/* Findings is the headline page: gold tab, gold-tinted page */
-.tabs button.gold { background: var(--accent); color: #16191d; font-weight: 700; border-radius: 9px; margin: 6px 4px 6px 6px; padding-top: 6px; padding-bottom: 6px; box-shadow: 0 2px 10px rgba(237,161,0,0.3); }
+/* Findings: only the tab button is gold, with a slow shine across it. The page itself uses the normal dark cards. */
+.tabs button.gold { position: relative; overflow: hidden; color: #16191d; font-weight: 700; border-radius: 9px; margin: 6px 4px 6px 6px; padding-top: 6px; padding-bottom: 6px;
+  background: linear-gradient(135deg, #c98a10 0%, #eda100 35%, #f8d776 55%, #eda100 75%, #c98a10 100%); box-shadow: 0 2px 10px rgba(237,161,0,0.3); }
 .tabs button.gold.on { box-shadow: 0 0 0 2px #fff3, 0 2px 12px rgba(237,161,0,0.45); }
-.tabs button.gold::after { display: none; }
-.pane#found { background: linear-gradient(180deg, rgba(237,161,0,0.16), rgba(237,161,0,0.05) 60%); border: 1px solid rgba(237,161,0,0.38); border-radius: 14px; padding: 14px; }
-.pane#found .overall { font-weight: 600; color: #ffe2a0; }
-.pane#found .finding { background: rgba(22,25,29,0.72); border-color: rgba(237,161,0,0.32); }
-.pane#found .finding.here { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.pane#found .finding .hero { color: #ffc247; }
-.pane#found .finding h2 { color: #ffe2a0; }
-@media (max-width: 560px) { .tabs button.gold { margin: 6px 2px 6px 4px; padding-left: 8px; padding-right: 8px; } .pane#found { padding: 10px; } }
-
-/* Findings: a gold page with a slow shine across it, dark lettering */
-.pane#found { position: relative; overflow: hidden; border: 1px solid #f6d27a; padding: 14px;
-  background: linear-gradient(135deg, #b9790a 0%, #e9a91c 22%, #f8d776 45%, #eeb02a 62%, #c98a10 100%); }
-.pane#found::before { content: ""; position: absolute; top: -20%; bottom: -20%; left: -60%; width: 45%; pointer-events: none; transform: skewX(-20deg);
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.42), transparent); animation: gold-shine 5.5s ease-in-out infinite; }
-@keyframes gold-shine { 0% { left: -60%; } 55%, 100% { left: 130%; } }
-.pane#found > * { position: relative; }
-.pane#found .finding { background: linear-gradient(180deg, rgba(255,248,226,0.92), rgba(255,240,200,0.86)); border: 1px solid rgba(110,70,0,0.35); box-shadow: 0 6px 18px rgba(80,50,0,0.25), inset 0 1px 0 rgba(255,255,255,0.7); color: #2a1e05; }
-.pane#found .finding.here { border-color: #5a3a00; box-shadow: 0 0 0 2px #5a3a00, 0 6px 18px rgba(80,50,0,0.3); }
-.pane#found .finding h2 { color: #4a3000; font-size: 15px; }
-.pane#found .finding .hero { color: #1d1403; font-size: 34px; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }
-.pane#found .finding .heronote, .pane#found .finding .muted { color: #6b4d12; }
-.pane#found .finding .conclusion { color: #1d1403; font-weight: 600; }
-.pane#found .finding ul { color: #33250a; }
-.pane#found .finding .sure { color: #5a4210; border-top-color: rgba(110,70,0,0.3); }
-.pane#found .finding .sure b { color: #2a1e05; }
-.pane#found .finding button { background: #2a1e05; color: #ffe2a0; border-color: #2a1e05; }
-.pane#found .finding button:hover { background: #47330a; }
-.pane#found > p.muted { color: #4a3000; } .pane#found > p.muted code { color: #2a1e05; }
-@media (prefers-reduced-motion: reduce) { .pane#found::before { animation: none; display: none; } }
-/* let the gold show through the cards */
-.pane#found .finding { background: linear-gradient(180deg, rgba(255,246,214,0.5), rgba(255,236,180,0.32)); }
-.pane#found .finding .heronote, .pane#found .finding .muted, .pane#found .finding .sure { color: #4a3406; }
+.tabs button.gold::before { content: ""; position: absolute; top: -20%; bottom: -20%; left: -80%; width: 50%; pointer-events: none; transform: skewX(-20deg);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent); animation: gold-shine 4.5s ease-in-out infinite; }
+@keyframes gold-shine { 0% { left: -80%; } 45%, 100% { left: 140%; } }
+@media (prefers-reduced-motion: reduce) { .tabs button.gold::before { display: none; } }
+@media (max-width: 560px) { .tabs button.gold { margin: 6px 2px 6px 4px; padding-left: 8px; padding-right: 8px; } }

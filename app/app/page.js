@@ -587,6 +587,9 @@ const EARTH_DAY = "2026-10-13";   // the day of the whole-Earth satellite pictur
 // Elevation tiles for the 3D ground and shaded relief. The older Mapzen set has bad pixels around Los Angeles harbour
 // (values of 450 m at sea level), which drew as needle-shaped mountains. Mapterhorn's set is clean there.
 const DEM_TILES = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
+// State and country shown beside each place name in the place menu.
+const WHERE = { "portuguese-bend": "CA, USA", "central-valley": "CA, USA", destin: "FL, USA", semarang: "Indonesia", "campi-flegrei": "Italy",
+  "mexico-city": "Mexico", kilauea: "HI, USA", reykjanes: "Iceland", delhi: "India", jakarta: "Indonesia", bangkok: "Thailand", lagos: "Nigeria", "ho-chi-minh": "Vietnam" };
 const GLOBE_ABOVE = 8;         // below this zoom the flat map bends into a globe (fully round by zoom 5.5)
 const PEEK = 148;             // height of the footer when it is down, in pixels (matches .sheet --h in the stylesheet)
 const IMPACT_TOP = 0.5;      // storm-change colour is full strength where the radar lost half its usual signal or more
@@ -988,7 +991,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
           <button className="brandchip" aria-haspopup="listbox" aria-expanded={siteMenu} onClick={() => setSiteMenu((v) => !v)}>{meta ? meta.short : "Loading"}<span className="caret" aria-hidden="true" /></button>
           {siteMenu && (
             <div className="sitemenu" role="listbox" aria-label="Choose a place">
-              {sites.map((st) => <button key={st.id} role="option" aria-selected={st.id === siteId} className={st.id === siteId ? "on" : ""} onClick={() => { setSiteMenu(false); setTour(null); setSiteId(st.id); }}>{st.short || st.id}</button>)}
+              {sites.map((st) => <button key={st.id} role="option" aria-selected={st.id === siteId} className={st.id === siteId ? "on" : ""} onClick={() => { setSiteMenu(false); setTour(null); setSiteId(st.id); }}><span>{st.short || st.id}</span>{WHERE[st.id] && <small>{WHERE[st.id]}</small>}</button>)}
             </div>)}
         </div>
         <div className="topbtns">

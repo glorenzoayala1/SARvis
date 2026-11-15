@@ -92,7 +92,7 @@ export default function Page() {
   const [sig, setSig] = useState(null);         // per-pass signal quality arrays {asc, desc}
   const [tour, setTour] = useState(null);       // {i, auto} while the guided tour runs
   const [copied, setCopied] = useState(false);
-  const DEFAULTS = { base: "sat", view3d: true, contours: true, labels: true, smooth: true, boxes: true, stations: true, inches: false, speed: "normal", tall: "medium", clouds: true, strength: 0.62 };
+  const DEFAULTS = { base: "sat", view3d: true, orbit: true, contours: true, labels: true, smooth: true, boxes: true, stations: true, inches: false, speed: "normal", tall: "medium", clouds: true, strength: 0.62 };
   const [opt, setOpt] = useState(DEFAULTS);
   const [showSettings, setShowSettings] = useState(false);
   useEffect(() => { try { const o = JSON.parse(window.localStorage.getItem("sarvis-options") || "null"); if (o) setOpt({ ...DEFAULTS, ...o, view3d: true }); } catch {} }, []);
@@ -102,6 +102,7 @@ export default function Page() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [sheet, setSheet] = useState("peek");   // footer height: peek, half or full
   const [dragH, setDragH] = useState(null);
+  const readoutFor = useRef("");
   const [siteMenu, setSiteMenu] = useState(false);
   // every sentence in the Findings tab is worked out from the data by pipeline/findings.py
   const [found, setFound] = useState(null);
@@ -214,7 +215,7 @@ export default function Page() {
     m.fitBounds([[w, s], [e, n]], { padding: { top: 64, bottom: 196, left: phone ? 16 : 40, right: phone ? 16 : 40 }, duration: firstFit.current || calm ? 0 : 1600, essential: true });
     firstFit.current = false;
     if (phone) document.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");   // start collapsed; the (i) button still opens it
-    const onClick = (ev) => { const p = toPixel(ev.lngLat.lng, ev.lngLat.lat); if (p) { setPick(p); setTab("spot"); setSheet((v) => (v === "peek" ? "half" : v)); } };
+    const onClick = (ev) => { const p = toPixel(ev.lngLat.lng, ev.lngLat.lat); setSheet("peek"); if (p) setPick({ ...p, at: [ev.lngLat.lng, ev.lngLat.lat] }); };      // a press on the map slides the footer down and reads that spot
     m.on("click", onClick);
     const boxes = { type: "FeatureCollection", features: [["#f0efec", meta.tied_to ? null : meta.ref_box], ["#eda100", meta.focus_box]].filter((b) => b[1])      // no reference patch when the site is pinned to a GPS station instead
       .map(([color, b]) => ({ type: "Feature", properties: { color }, geometry: { type: "LineString", coordinates: boxLine(b) } })) };
@@ -699,6 +700,63 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t, ctx, cam3d]);
   useEffect(() => { if (tour && opt.view3d) set({ view3d: false }); }, [tour]);
 
+  // In 3D the camera slowly circles the place. Touching the map pauses it; it picks up again a few seconds after you let go.
+  useEffect(() => {
+    const m = map.current; if (!m || !ready || !opt.view3d || !opt.orbit || tour || showSettings) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let timer = 0, held = false, live = true;
+    const go = () => { if (!live || held) return; m.easeTo({ bearing: m.getBearing() + 120, duration: 60000, easing: (x) => x }, { orbit: true }); };      // 2 degrees a second
+    const later = (ms) => { clearTimeout(timer); timer = setTimeout(go, ms); };
+    const hold = () => { held = true; clearTimeout(timer); }, release = () => { held = false; later(5000); };
+    const onEnd = (e) => { if (held) return; if (e.orbit) go(); else later(4000); };
+    const el = m.getContainer();
+    el.addEventListener("pointerdown", hold); el.addEventListener("wheel", () => { hold(); release(); }, { passive: true }); window.addEventListener("pointerup", release);
+    m.on("moveend", onEnd); later(2500);
+    return () => { live = false; clearTimeout(timer); m.off("moveend", onEnd); el.removeEventListener("pointerdown", hold); window.removeEventListener("pointerup", release); m.stop(); };
+  }, [ready, opt.view3d, opt.orbit, tour, showSettings, siteId]);
+
+  // Readout beside the spot you pressed: the numbers resolve out of ones and zeros, like a digital display.
+  const readout = useRef(null);
+  useEffect(() => {
+    const m = map.current; readout.current?.remove(); readout.current = null;
+    if (!m || !ready || !meta || !layer || !grid || grid._key !== layer.key || !pick || pick.station || tour) return;
+    const idx = pick.j * meta.nx + pick.i; let big, sub, bits;
+    if (!layer.static) { const v = valueAt(grid, layer, t, idx);
+      big = v === null ? "NO READING" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v * uf).toFixed(1)} ${unit}`;
+      const word = (ENDS[layer.kind] || ["down", "up"])[v < 0 ? 0 : 1];
+      sub = v === null ? "the radar could not follow this spot" : speed ? `moving ${word}, around ${fmtDate(layer.dates[t])}` : `${KEYWORD[word] || `moved ${word}`} from ${fmtDate(layer.dates[0])} to ${fmtDate(layer.dates[t])}`;
+      bits = v === null ? null : Math.round(Math.abs(v) * 10); }
+    else { const q = grid[idx], none = q === (layer.nodata ?? 255);
+      big = none ? "NO READING" : isImpact ? `${Math.round((100 * q) / layer.max)}%` : (q / layer.max).toFixed(2);
+      sub = none ? "the radar could not follow this spot" : isImpact ? "of the usual signal lost in the storm pass" : "signal quality, from 0 to 1";
+      bits = none ? null : q; }
+    const [lon, lat] = pick.at || [pick.lon, pick.lat], pt = m.project([lon, lat]), W = m.getContainer().clientWidth;
+    const el = document.createElement("div"); el.className = "readout"; el.onclick = (e) => e.stopPropagation();
+    const row = (cls, text) => { const d = document.createElement("div"); d.className = cls; d.textContent = text; el.appendChild(d); return d; };
+    row("rd-top", `SPOT  ${Math.abs(lat).toFixed(4)}°${lat >= 0 ? "N" : "S"}  ${Math.abs(lon).toFixed(4)}°${lon >= 0 ? "E" : "W"}`);
+    const bigEl = row("rd-big", big), subEl = row("rd-sub", sub);
+    const bitEl = row("rd-bits", bits === null ? "" : `${bits.toString(2).padStart(12, "0")}  = ${bits}${layer.static ? "" : " mm"}`);
+    const btns = document.createElement("div"); btns.className = "rd-btns"; el.appendChild(btns);
+    const btn = (text, fn) => { const b = document.createElement("button"); b.textContent = text; b.onclick = (e) => { e.stopPropagation(); fn(); }; btns.appendChild(b); };
+    btn("History", () => { setTab("spot"); setSheet("half"); }); btn("Close", () => setPick(null));
+    // the characters start as ones and zeros and settle left to right into the real text
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches || readoutFor.current === `${pick.i},${pick.j}`;
+    readoutFor.current = `${pick.i},${pick.j}`;
+    let raf = 0;
+    if (!still) { const targets = [[bigEl, big], [subEl, sub]], t0 = performance.now(), dur = 620;
+      const tick = (now) => { const f = Math.min(1, (now - t0) / dur);
+        for (const [node, text] of targets) { const done = Math.floor(f * text.length); let out = text.slice(0, done);
+          for (let k = done; k < text.length; k++) out += text[k] === " " ? " " : Math.random() < 0.5 ? "0" : "1";
+          node.textContent = out; }
+        if (f < 1) raf = requestAnimationFrame(tick); };
+      raf = requestAnimationFrame(tick); }
+    const left = pt.x > W - 250, up = pt.y < 210;
+    const holder = document.createElement("div"); holder.className = "readout-at"; holder.appendChild(el);      // the map moves the holder; the card inside does its own entrance
+    readout.current = new maplibregl.Marker({ element: holder, anchor: `${up ? "top" : "bottom"}-${left ? "right" : "left"}`, offset: [left ? -12 : 12, up ? 12 : -12] }).setLngLat([lon, lat]).addTo(m);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, meta, layerKey, grid, pick, t, mode, opt.inches, tour]);
+  useEffect(() => () => { readout.current?.remove(); }, []);
+
   // Soft value labels on the map: walk outward from the biggest change in three directions and
   // drop a number wherever the surface crosses one of the contour levels.
   const valMarks = useRef([]);
@@ -811,6 +869,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             <Toggle label="GPS stations" on={opt.stations} onChange={(v) => set({ stations: v })} />
             <h3>3D</h3>
             <Toggle label="Clouds" hint="A cloud layer over the site. Cover and drift direction follow NASA's daily figures; drift is sped up 12 times" on={opt.clouds} onChange={(v) => set({ clouds: v })} />
+            <Toggle label="Circle overhead" hint="The 3D camera slowly circles the place. It pauses while you move the map" on={opt.orbit} onChange={(v) => set({ orbit: v })} />
             <Pick label="Column height" value={opt.tall} onChange={(v) => set({ tall: v })} items={[["low", "Low"], ["medium", "Medium"], ["high", "High"]]} />
             <h3>Numbers and playback</h3>
             <Pick label="Units" value={opt.inches ? "in" : "cm"} onChange={(v) => set({ inches: v === "in" })} items={[["cm", "Centimetres"], ["in", "Inches"]]} />

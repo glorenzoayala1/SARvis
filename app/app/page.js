@@ -539,6 +539,8 @@ const CLOUD_BASE_M = 1000;    // lowest cloud layer height above sea level, befo
                               // the layer is raised when needed so it stays above the default 3D camera.
 const IMPACT_TOP = 0.5;      // storm-change colour is full strength where the radar lost half its usual signal or more
 const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wind speed, so the movement is visible
+  const camAlt3d = useRef(0); const zoom3d = useRef(0); const [cam3d, setCam3d] = useState(0);
+  const colsRef = useRef([]); const colMarks = useRef([]); const [colsVer, setColsVer] = useState(0);
   const mPerCm = useMemo(() => {
     if (!meta || !layer || layer.static) return 0;
     const widthM = (meta.bbox[2] - meta.bbox[0]) * 111320 * Math.cos((((meta.bbox[1] + meta.bbox[3]) / 2) * Math.PI) / 180);
@@ -554,7 +556,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const push = () => { if (!live) return; if (m.getSource("bars")) m.getSource("bars").setData(fc);
       else { m.addSource("bars", { type: "geojson", data: fc });
         m.addLayer({ id: "bars", type: "fill-extrusion", source: "bars", paint: { "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": true } }, top.current); } };
-    if (!on) { push(); return; }
+    if (!on) { colsRef.current = []; setColsVer((v) => v + 1); push(); return; }
     const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 800)));       // about 800 blocks at most, so the land stays visible between columns
     const widthM = (e - w) * 111320 * Math.cos((((s + n) / 2) * Math.PI) / 180), impactTop = widthM * 0.018 * { low: 0.5, medium: 1, high: 2 }[opt.tall];
     const dx = (e - w) / nx, dy = (n - s) / ny, cols = [];
@@ -567,14 +569,37 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       if (!cnt) continue;
       const v = sum / cnt, k = layer.static ? v : v / lim; if (Math.abs(k) < 0.15) continue;          // leave out near-zero noise
       const cx = w + (i + B / 2) * dx, cy = n - (j + B / 2) * dy, hw = B * dx * 0.06, hh = B * dy * 0.06;   // thin: about an eighth of the block
-      cols.push({ lon: cx, lat: cy, hw, hh, h: layer.static ? Math.min(1, v / IMPACT_TOP) * impactTop : Math.abs(v) * mPerCm,
+      cols.push({ lon: cx, lat: cy, hw, hh, v, h: layer.static ? Math.min(1, v / IMPACT_TOP) * impactTop : Math.abs(v) * mPerCm,
         c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, Math.abs(k) / (layer.static ? IMPACT_TOP : 1)))})` });
     }
     // the map itself lifts each column onto the terrain, so heights here are measured from the ground
     fc.features = cols.map((q) => ({ type: "Feature", properties: { b: 0, h: q.h, c: q.c }, geometry: { type: "Polygon", coordinates: [[[q.lon - q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat + q.hh]]] } }));
     push();
+    // text for the number shown beside each column once you zoom in (drawn by the effect below)
+    cols.forEach((q) => { const x = layer.static ? Math.round(100 * q.v) : q.v * uf;
+      q.t = layer.static ? `${x}%` : `${x > 0 ? "+" : "−"}${Math.abs(x) >= 10 ? Math.abs(x).toFixed(0) : Math.abs(x).toFixed(1)} ${un}`; });
+    colsRef.current = cols; setColsVer((v) => v + 1);
     return () => { live = false; };
-  }, [ready, opt.view3d, opt.tall, bars3d, meta, grid, layerKey, t, mode, lim, mPerCm]);
+  }, [ready, opt.view3d, opt.tall, opt.inches, bars3d, meta, grid, layerKey, t, mode, lim, mPerCm]);
+  // Numbers beside the columns. They appear once you zoom in past the opening 3D view, biggest changes first,
+  // and any that would sit on top of another are left out. Zoom further and more of them fit.
+  useEffect(() => {
+    const m = map.current; if (!m || !ready) return;
+    const clear = () => { colMarks.current.forEach((k) => k.remove()); colMarks.current = []; };
+    const draw = () => { clear();
+      if (!opt.view3d || !opt.labels || !colsRef.current.length || !zoom3d.current || m.getZoom() < zoom3d.current + 0.5) return;
+      const W = m.getContainer().clientWidth, H = m.getContainer().clientHeight, kept = [];
+      for (const q of [...colsRef.current].sort((a, b) => Math.abs(b.v) - Math.abs(a.v))) {
+        if (kept.length >= 40) break;
+        const p = m.project([q.lon, q.lat]); if (p.x < 24 || p.y < 70 || p.x > W - 24 || p.y > H - 24) continue;
+        if (kept.some((k) => Math.abs(k.x - p.x) < 62 && Math.abs(k.y - p.y) < 24)) continue;
+        kept.push(p);
+        const el = document.createElement("div"); el.className = "vlabel col"; el.textContent = q.t;
+        colMarks.current.push(new maplibregl.Marker({ element: el, anchor: "top", offset: [0, 3] }).setLngLat([q.lon, q.lat]).addTo(m));
+      } };
+    draw(); m.on("moveend", draw);
+    return () => { m.off("moveend", draw); clear(); };
+  }, [ready, opt.view3d, opt.labels, colsVer, cam3d]);
   useEffect(() => {            // tilt into the terrain and move in close on the focus area; flatten on the way out
     const m = map.current; if (!m || !ready || !meta) return;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -586,7 +611,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       const z3 = Math.min((cam?.zoom ?? 12) + 0.35, 15.5), latc = (f[1] + f[3]) / 2;
       // how high the camera ends up in this view (metres): the cloud layer is kept above it, so you look along its underside
       camAlt3d.current = Math.cos((77 * Math.PI) / 180) * ((m.getContainer().clientHeight / 2) / Math.tan((36.87 / 2) * Math.PI / 180)) * ((40075016.686 * Math.cos((latc * Math.PI) / 180)) / (512 * 2 ** z3)) + 400;
-      setCam3d(camAlt3d.current);
+      zoom3d.current = z3; setCam3d(camAlt3d.current);
       m.easeTo({ center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: -18, duration: calm ? 0 : 1800, essential: true });
     } else {
       m.dragRotate.disable(); m.touchZoomRotate.disableRotation(); m.setTerrain(null);
@@ -595,7 +620,6 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   }, [opt.view3d, ready, meta?.id]);
   // Clouds in 3D: how many depends on NASA's daily cloud cover for the selected date. Sizes and heights are set
   // relative to the site (bases about 260 to 600 m up, a low marine-layer height that stays below the close camera, stretched like the land), so they sit in scale with the terrain.
-  const camAlt3d = useRef(0); const [cam3d, setCam3d] = useState(0);
   const cloudPct = useMemo(() => {
     if (!ctx?.cloud || !layer) return null;
     const d = layer.static ? (meta?.event ? null : null) : layer.dates[t], k = d ? ctx.cloud.dates.indexOf(d) : -1;
@@ -626,17 +650,16 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         const pr = gl.createProgram();
         gl.attachShader(pr, sh(gl.VERTEX_SHADER, `attribute vec3 a_pos; attribute vec2 a_km; uniform mat4 u_m; uniform float u_ground; varying vec2 v_km;
           uniform vec3 u_ctr;
-          void main() { float wide = u_ground > 0.5 ? 20.0 : 1.0; v_km = a_km * wide;
+          void main() { float wide = u_ground > 1.5 ? 20.0 : 1.0;      // only the far sky is stretched: stretching the others cost the precision the haze distance needs v_km = a_km * wide;
             vec3 q = vec3(u_ctr.xy + (a_pos.xy - u_ctr.xy) * wide, u_ground > 1.5 ? a_pos.z * 30.0 : (u_ground > 0.5 ? 0.0 : a_pos.z));
             vec4 p = u_m * vec4(q, 1.0); p.z = (u_ground > 1.5 ? 0.9999 : 0.9995) * p.w;
-            gl_Position = u_ground > 2.5 ? vec4(a_km / 3000.0, 0.99995, 1.0) : p; }`));     // pinned to the far depth: land and columns stay in front
+            gl_Position = p; }`));     // pinned to the far depth: land and columns stay in front
         gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision highp float; varying vec2 v_km; uniform vec2 u_off; uniform float u_cover; uniform float u_below; uniform float u_ground; uniform vec2 u_cam; uniform float u_reach;
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
             return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
           float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.03 + 17.0; a *= 0.5; } return s; }
           void main() { float dist = length(v_km - u_cam); vec3 hz = vec3(0.80, 0.86, 0.92);
-            if (u_ground > 2.5) { gl_FragColor = vec4(hz, 1.0); return; }                                                                 // plain backing over the whole screen, behind everything
             if (u_ground > 1.5) { gl_FragColor = vec4(mix(vec3(0.33, 0.54, 0.86), hz, smoothstep(30.0, 900.0, dist)), 1.0); return; }      // open sky behind everything
             if (u_ground > 0.5) { float f = smoothstep(2.3 * u_reach, 6.0 * u_reach, dist); gl_FragColor = vec4(hz * f, f); return; }                // distant land fades into haze up to the skyline
             vec2 p = (v_km + u_off) / 2.6;
@@ -657,7 +680,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       render(gl, mx) {
         const d = cloudData.current, L = this.loc, mm = map.current; if (!d.on || !mm) return;
         // a sheet far wider than the view, centred on the site, so it runs past the skyline in every direction
-        const R = 3000, c = maplibregl.MercatorCoordinate.fromLngLat([d.lon0, d.lat0], d.alt), u = c.meterInMercatorCoordinateUnits() * 1000, arr = new Float32Array(30); let o = 0;
+        const R = 30000, c = maplibregl.MercatorCoordinate.fromLngLat([d.lon0, d.lat0], d.alt), u = c.meterInMercatorCoordinateUnits() * 1000, arr = new Float32Array(30); let o = 0;
         for (const [x, y] of [[-R, -R], [R, -R], [R, R], [-R, -R], [R, R], [-R, R]]) { arr[o++] = c.x + x * u; arr[o++] = c.y - y * u; arr[o++] = c.z; arr[o++] = x; arr[o++] = y; }
         // is the camera under the layer (look along its underside) or over it (look down through it)?
         const tr = mm.transform, ppm = (512 * 2 ** mm.getZoom()) / (40075016.686 * Math.cos((mm.getCenter().lat * Math.PI) / 180));      // screen pixels per metre at the map centre
@@ -670,7 +693,6 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, 20, 0); gl.enableVertexAttribArray(L.km); gl.vertexAttribPointer(L.km, 2, gl.FLOAT, false, 20, 12);
         gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x, c.y, c.z); gl.uniform1f(L.reach, Math.max(1, tr.cameraToCenterDistance / ppm / 1000));     // haze starts a little past the point the camera looks at, at any zoom
         gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        gl.enable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 3); gl.drawArrays(gl.TRIANGLES, 0, 6);             // haze-coloured backing, so no dark gaps can show through
         gl.disable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 1); gl.drawArrays(gl.TRIANGLES, 0, 6);            // haze over the far land, drawn at sea level
         gl.enable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 2); gl.drawArrays(gl.TRIANGLES, 0, 6);             // open sky; land and columns stay in front
         gl.uniform1f(L.ground, 0); gl.drawArrays(gl.TRIANGLES, 0, 6);                                       // the cloud layer

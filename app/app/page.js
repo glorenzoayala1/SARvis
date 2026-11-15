@@ -121,6 +121,7 @@ export default function Page() {
   const under = useRef(null);
   const starsEl = useRef(null);
   const readoutFor = useRef("");
+  const readNodes = useRef(null);
   const [siteMenu, setSiteMenu] = useState(false);
   // every sentence in the Findings tab is worked out from the data by pipeline/findings.py
   const [found, setFound] = useState(null);
@@ -852,13 +853,10 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     return () => { live = false; clearTimeout(timer); m.off("moveend", onEnd); el.removeEventListener("pointerdown", hold); el.removeEventListener("wheel", onWheel); clearTimeout(wt); window.removeEventListener("pointerup", release); m.stop(); };
   }, [ready, opt.view3d, opt.orbit, tour, showSettings, siteId, !!pick]);
 
-  // Readout beside the spot you pressed: the numbers resolve out of ones and zeros, like a digital display.
-  const readout = useRef(null);
-  useEffect(() => {
-    const m = map.current; readout.current?.remove(); readout.current = null;
-    if (!m || !ready || !meta || !layer || !grid || grid._key !== layer.key || !pick || pick.station || tour) return;
+  // What the spot readout says right now. During playback the value glides between dates, so the number counts up or down.
+  const readNow = () => {
     const idx = pick.j * meta.nx + pick.i; let big, sub, bits;
-    if (!layer.static) { const v = valueAt(grid, layer, t, idx);
+    if (!layer.static) { const v = vNow(idx);
       big = v === null ? "NO READING" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v * uf).toFixed(1)} ${unit}`;
       const word = (ENDS[layer.kind] || ["down", "up"])[v < 0 ? 0 : 1];
       sub = v === null ? "the radar could not follow this spot" : speed ? `moving ${word}, around ${fmtDate(layer.dates[t])}` : `${KEYWORD[word] || `moved ${word}`} from ${fmtDate(layer.dates[0])} to ${fmtDate(layer.dates[t])}`;
@@ -867,12 +865,21 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       big = none ? "NO READING" : isImpact ? `${Math.round((100 * q) / layer.max)}%` : (q / layer.max).toFixed(2);
       sub = none ? "the radar could not follow this spot" : isImpact ? "of the usual signal lost in the storm pass" : "signal quality, from 0 to 1";
       bits = none ? null : q; }
+    return { big, sub, bits };
+  };
+  // Readout beside the spot you pressed: the numbers resolve out of ones and zeros, like a digital display.
+  const readout = useRef(null);
+  useEffect(() => {
+    const m = map.current; readout.current?.remove(); readout.current = null;
+    if (!m || !ready || !meta || !layer || !grid || grid._key !== layer.key || !pick || pick.station || tour) return;
+    const { big, sub, bits } = readNow();
     const [lon, lat] = pick.at || [pick.lon, pick.lat], pt = m.project([lon, lat]), W = m.getContainer().clientWidth;
     const el = document.createElement("div"); el.className = "readout"; el.onclick = (e) => e.stopPropagation();
     const row = (cls, text) => { const d = document.createElement("div"); d.className = cls; d.textContent = text; el.appendChild(d); return d; };
     row("rd-top", `SPOT  ${Math.abs(lat).toFixed(4)}°${lat >= 0 ? "N" : "S"}  ${Math.abs(lon).toFixed(4)}°${lon >= 0 ? "E" : "W"}`);
     const bigEl = row("rd-big", big), subEl = row("rd-sub", sub);
     const bitEl = row("rd-bits", bits === null ? "" : `${bits.toString(2).padStart(12, "0")} = ${bits}${layer.static ? "" : " mm"}`);
+    readNodes.current = { bigEl, subEl, bitEl, busy: true };
     const btns = document.createElement("div"); btns.className = "rd-btns"; el.appendChild(btns);
     const btn = (text, fn) => { const b = document.createElement("button"); b.textContent = text; b.onclick = (e) => { e.stopPropagation(); fn(); }; btns.appendChild(b); };
     btn("History", () => { setTab("spot"); setSheet("half"); }); btn("Close", () => setPick(null));
@@ -896,7 +903,15 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     holder.className = "readout-at" + (small ? " small" : "");
     readout.current = new maplibregl.Marker({ element: holder, anchor: vert + side, offset: [side === "right" ? -14 : 14, vert === "top-" ? 10 : vert ? -10 : 0] }).setLngLat([lon, lat]).addTo(m);
     return () => cancelAnimationFrame(raf);
-  }, [ready, meta, layerKey, grid, pick, t, mode, opt.inches, tour]);
+  }, [ready, meta, layerKey, grid, pick, mode, opt.inches, tour]);
+  // While the card is open, changing the date (or playing) only changes its numbers and caption. The card itself stays put.
+  useEffect(() => {
+    const n = readNodes.current; if (!n || !readout.current || !pick || !layer || !grid || grid._key !== layer.key) return;
+    if (n.busy) { n.busy = false; return; }                      // the opening animation is writing the text; leave the first pass to it
+    const { big, sub, bits } = readNow();
+    n.bigEl.textContent = big; n.subEl.textContent = sub;
+    n.bitEl.textContent = bits === null ? "" : `${bits.toString(2).padStart(12, "0")} = ${bits}${layer.static ? "" : " mm"}`;
+  }, [t, fr]);
   useEffect(() => () => { readout.current?.remove(); }, []);
 
   // Soft value labels on the map: walk outward from the biggest change in three directions and

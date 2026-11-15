@@ -212,7 +212,7 @@ export default function Page() {
     if (phone) document.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");   // start collapsed; the (i) button still opens it
     const onClick = (ev) => { const p = toPixel(ev.lngLat.lng, ev.lngLat.lat); if (p) { setPick(p); setTab("spot"); setSheet((v) => (v === "peek" ? "half" : v)); } };
     m.on("click", onClick);
-    const boxes = { type: "FeatureCollection", features: [["#f0efec", meta.ref_box], ["#eda100", meta.focus_box]].filter((b) => b[1])
+    const boxes = { type: "FeatureCollection", features: [["#f0efec", meta.tied_to ? null : meta.ref_box], ["#eda100", meta.focus_box]].filter((b) => b[1])      // no reference patch when the site is pinned to a GPS station instead
       .map(([color, b]) => ({ type: "Feature", properties: { color }, geometry: { type: "LineString", coordinates: boxLine(b) } })) };
     const draw = () => {
       if (m.getSource("boxes")) m.getSource("boxes").setData(boxes);
@@ -419,7 +419,7 @@ export default function Page() {
       ...(hasS1 ? [{ title: "Old radar, new radar", layer: "s1_up", mode: "total", point: "box", label: "Blank = no reading", glow: "coverage",
         say: (d) => { const a = lo(d.cov?.nisar), c = lo(d.cov?.s1); return `This is Sentinel-1, whose 5.5 cm wavelength is a quarter of NISAR's.${a !== null && c !== null ? ` Over the same weeks it got a usable reading in the yellow box on ${Math.round(100 * c)}% of passes; NISAR managed ${Math.round(100 * a)}%.` : ""}`; } }] : []),
       ...(st ? [{ title: "Checked on the ground", layer: "up", mode: "total", station: st, point: "station", label: `GPS ${st.id}`, glow: "pickcard", notes: true,
-        say: (d) => `A fixed GPS antenna measured the same ground.${d.stat ? ` Radar and GPS differ by ${d.stat.rms.toFixed(2)} cm on average here.` : ""} One limit to know: north-south motion is mostly invisible to this radar.` }] : []),
+        say: (d) => `A fixed GPS antenna measured the same ground.${meta.tied_to ? ` Here the radar is pinned to GPS station ${meta.tied_to}, so the two match at that station by design: it sets the zero, it is not a test.` : d.stat ? ` Radar and GPS differ by ${d.stat.rms.toFixed(2)} cm on average here.` : ""} One limit to know: north-south motion is mostly invisible to this radar.` }] : []),
     ];
   }, [meta, ctx, opt.inches]);
   const step = tour && steps[tour.i];
@@ -856,6 +856,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             {sigChart && <Chart key={`s${pick.i}-${pick.j}`} lines={sigChart.lines} markX={null} eventX={eventX} eventLabel={meta.event?.name} domain={[0, 1]} unit="" />}
             {cur && cur.y !== null && <div className="hero" key={`${pick.i}-${pick.j}-${mode}`}>{fmtCm(shown ?? cur.y)}<small> {ends ? (cur.y >= 0 ? ends[1] : ends[0]) : ""} {speed ? "around" : "by"} {fmtDate(layer.dates[t])}</small></div>}
             {chart && <Chart key={`m${pick.i}-${pick.j}-${layerKey}-${mode}`} k={uf} lines={chart.lines} markX={toDay(layer.dates[t])} eventX={eventX} eventLabel={meta.event?.name} />}
+            {meta.tied_to && <p className="muted" style={{ margin: "8px 0 0" }}><b style={{ color: "var(--ink)" }}>Pinned to GPS station {meta.tied_to}.</b> {meta.tie_note} A close match at that station is by design, not a test.</p>}
             {chart?.stat && <p className="muted" style={{ margin: "8px 0 0" }}>Radar minus GPS, root-mean-square: <b style={{ color: "var(--ink)" }}>{(chart.stat.rms * uf).toFixed(2)} {un}</b> over {chart.stat.n} dates{ctx.gnss.ref ? ` (GPS relative to station ${ctx.gnss.ref})` : " (GPS not referenced; compare vertical only)"}.</p>}
           </div>
             </div>

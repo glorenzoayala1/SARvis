@@ -78,6 +78,9 @@ SITES = {
         "name": "Central Valley subsidence near Corcoran, CA",
         "emoji": "\U0001f33e", "short": "Central Valley",
         "story": "Farmland that sinks when groundwater is pumped out and rebounds a little when it rains.",
+        # What the first full real run showed, after pinning it to GPS (pipeline/tie_to_gps.py), written by hand from the numbers:
+        "finding": "GPS station HANF rose about 3 cm through the wet winter, then sank about 9 cm from late February to October. "
+                   "With the radar pinned to that station, the middle of the yellow box sank about 9 cm and the deepest spot about 33 cm.",
         "bbox": (-119.750, 36.000, -119.400, 36.250),
         "ref_box": (-119.440, 36.210, -119.410, 36.240),
         "focus_box": (-119.700, 36.050, -119.500, 36.200),

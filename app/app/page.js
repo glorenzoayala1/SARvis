@@ -181,7 +181,8 @@ export default function Page() {
     map.current.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
     const m = map.current;
     if (typeof window !== "undefined") window.__sarvisMap = m;      // handy for debugging in the console
-    const setup = () => {
+    let did = false;
+    const setup = () => { if (did) return; did = true;
       // Zoom all the way out and the map becomes the Earth in space, with that day's real cloud from NASA's VIIRS satellite image.
       try {
         m.setProjection({ type: ["interpolate", ["linear"], ["zoom"], 5.5, "vertical-perspective", GLOBE_ABOVE, "mercator"] });
@@ -218,12 +219,12 @@ export default function Page() {
       document.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");       // start collapsed; the (i) button opens it
       setReady(true);
     };
-    m.on("load", setup);
+    m.once("style.load", setup);        // as soon as the style is read; waiting for every tile left the app idle on slow connections
     // Background tiles sometimes fail or get cancelled mid-flight; the map retries them, so keep the console quiet.
     m.on("error", (e) => { if (!/fetch|tile|AJAX|abort/i.test(e?.error?.message || "")) console.warn(e?.error || e); });
     // If the vector map never arrives (service down, offline venue Wi-Fi), fall back to plain OpenStreetMap tiles.
     setTimeout(() => {
-      if (m.isStyleLoaded() || m.getSource("sat")) return;
+      if (did) return;
       m.once("style.load", setup);
       m.setStyle({ version: 8, sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
         layers: [{ id: "osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.8, "raster-brightness-max": 0.6 } }] });
@@ -691,14 +692,17 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       // how high the camera ends up in this view (metres): the cloud layer is kept above it, so you look along its underside
       camAlt3d.current = Math.cos((77 * Math.PI) / 180) * ((m.getContainer().clientHeight / 2) / Math.tan((36.87 / 2) * Math.PI / 180)) * ((40075016.686 * Math.cos((latc * Math.PI) / 180)) / (512 * 2 ** z3)) + 400;
       zoom3d.current = z3; setCam3d(camAlt3d.current);
-      const far = m.getZoom() < 9, to = { center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: -18, essential: true };
+      const here = m.getCenter(), tc = cam?.center || { lng: (f[0] + f[2]) / 2, lat: (f[1] + f[3]) / 2 }, tl = tc.lng ?? tc[0], tt = tc.lat ?? tc[1];
+      const hop = Math.hypot((here.lng - tl) * Math.cos((tt * Math.PI) / 180), here.lat - tt) > 0.8;            // the new place is far away: rise up, cross over, come down
+      const far = m.getZoom() < 9 || hop, to = { center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: -18, essential: true };
       try { m.setMaxPitch(84); } catch (e) {}
       if (!calm) arrive(m);
-      if (far && !calm) m.flyTo({ ...to, duration: 5200, curve: 1.3 }); else m.easeTo({ ...to, duration: calm ? 0 : 1800 });
+      if (far && !calm) m.flyTo({ ...to, duration: hop ? 7000 : 5200, curve: hop ? 1.55 : 1.3 }); else m.easeTo({ ...to, duration: calm ? 0 : 1800 });
     } else {
       m.dragRotate.disable(); m.touchZoomRotate.disableRotation(); m.setTerrain(null);
-      const far = m.getZoom() < 9;
-      if (far && !calm) { arrive(m); fitSite(4800); }
+      const c0 = m.getCenter(), bb = meta.bbox, hop = Math.hypot((c0.lng - (bb[0] + bb[2]) / 2) * Math.cos((c0.lat * Math.PI) / 180), c0.lat - (bb[1] + bb[3]) / 2) > 0.8;
+      const far = m.getZoom() < 9 || hop;
+      if (far && !calm) { arrive(m); fitSite(hop ? 6500 : 4800); }
       else { m.easeTo({ pitch: 0, bearing: 0, duration: calm ? 0 : 900, essential: true }); setTimeout(() => fitSite(calm ? 0 : 900), calm ? 0 : 950); }
     }
   }, [opt.view3d, ready, meta?.id, landTick]);
@@ -799,13 +803,15 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   // Zoomed far out: stars appear around the Earth, and the camera levels off so the globe sits in the middle of the screen.
   useEffect(() => {
     const m = map.current; if (!m || !ready) return;
-    const onZoom = () => { const z = m.getZoom(), el = starsEl.current;
-      try { m.setMaxPitch(z < 4.5 ? 0 : z < GLOBE_ABOVE ? ((z - 4.5) / (GLOBE_ABOVE - 4.5)) * 84 : 84); } catch (e) {}
+    // Levelling the camera cuts short any flight in progress, so it is done only while the user is zooming by hand, or once a move has ended.
+    const level = () => { const z = m.getZoom(); try { m.setMaxPitch(z < 4.5 ? 0 : z < GLOBE_ABOVE ? ((z - 4.5) / (GLOBE_ABOVE - 4.5)) * 84 : 84); } catch (e) {} };
+    const onZoom = (ev) => { const z = m.getZoom(), el = starsEl.current;
+      if (ev?.originalEvent) level();
       m.getContainer().closest(".stage")?.classList.toggle("far", z < 9);
       if (el) { const R = (512 * 2 ** z) / (2 * Math.PI);              // the globe's radius on screen, in pixels
         el.style.opacity = Math.max(0, Math.min(1, (5.5 - z) / 1.5));
         el.style.setProperty("--r", `${Math.round(R + 14)}px`); } };
-    const onEnd = () => { if (opt.view3d && bars3d && !tour && m.getZoom() >= GLOBE_ABOVE && m.getPitch() < 60 && !m.isMoving()) m.easeTo({ pitch: 77, duration: 900 }); };
+    const onEnd = () => { level(); if (opt.view3d && bars3d && !tour && m.getZoom() >= GLOBE_ABOVE && m.getPitch() < 60 && !m.isMoving()) m.easeTo({ pitch: 77, duration: 900 }); };
     m.on("zoom", onZoom); m.on("zoomend", onEnd); onZoom();
     return () => { m.off("zoom", onZoom); m.off("zoomend", onEnd); };
   }, [ready, opt.view3d, bars3d, tour]);
@@ -815,10 +821,10 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const m = map.current; if (!m || !ready || !opt.view3d || !opt.orbit || tour || showSettings || pick) return;      // it also holds still while a spot readout is open
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let timer = 0, held = false, live = true;
-    const go = () => { if (!live || held) return; if (m.getZoom() < GLOBE_ABOVE) { later(4000); return; } m.easeTo({ bearing: m.getBearing() + 120, duration: 110000, easing: (x) => x }, { orbit: true }); };      // about 1 degree a second
+    const go = () => { if (!live || held) return; if (m.getZoom() < GLOBE_ABOVE) { later(4000); return; } if (m.isMoving()) { later(1200); return; }      /* never cut into a flight that is under way */ m.easeTo({ bearing: m.getBearing() + 120, duration: 110000, easing: (x) => x }, { orbit: true }); };      // about 1 degree a second
     const later = (ms) => { clearTimeout(timer); timer = setTimeout(go, ms); };
     const hold = () => { held = true; clearTimeout(timer); }, release = () => { held = false; later(5000); };
-    const onEnd = (e) => { if (held) return; if (e.orbit) go(); else later(4000); };
+    const onEnd = (e) => { if (held) return; later(e.orbit ? 0 : 4000); };       // always on a fresh tick: restarting inside the map's own move-end handling broke the next flight
     const el = m.getContainer();
     el.addEventListener("pointerdown", hold); el.addEventListener("wheel", () => { hold(); release(); }, { passive: true }); window.addEventListener("pointerup", release);
     m.on("moveend", onEnd); later(2500);

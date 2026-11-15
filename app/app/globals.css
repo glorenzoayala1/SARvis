@@ -383,3 +383,16 @@ button.brandchip { color: var(--ink); font-weight: 600; cursor: pointer; gap: 8p
 .splitrow { margin-top: 8px; } .splitrow input[type=range] { width: 100%; margin-top: 6px; }
 .bandtag { font: 600 12px system-ui, sans-serif; color: #fff; background: rgba(14,17,22,0.9); border: 1.5px solid #fff; border-radius: 999px; padding: 3px 9px; white-space: nowrap; pointer-events: none; }
 .far .bandtag { display: none; }
+
+/* place menu: opens with a soft drop, items follow one after another, caret turns */
+.sitemenu { transform-origin: top left; animation: menu-in 0.22s cubic-bezier(.2,.9,.3,1.15) both; }
+.sitemenu button { animation: item-in 0.26s ease-out both; transition: background .15s, color .15s, padding-left .15s; }
+.sitemenu button:nth-child(2) { animation-delay: .03s; } .sitemenu button:nth-child(3) { animation-delay: .06s; } .sitemenu button:nth-child(4) { animation-delay: .09s; }
+.sitemenu button:nth-child(5) { animation-delay: .12s; } .sitemenu button:nth-child(6) { animation-delay: .15s; } .sitemenu button:nth-child(n+7) { animation-delay: .18s; }
+.sitemenu button:hover { padding-left: 16px; }
+.sitemenu { max-height: min(70dvh, 520px); overflow-y: auto; }
+button.brandchip { transition: background .15s, transform .12s; } button.brandchip:active { transform: scale(0.97); }
+.brandchip .caret { transition: transform .22s ease; } .brandchip[aria-expanded="true"] .caret { transform: rotate(225deg) translateY(-2px); }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-6px) scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes item-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .sitemenu, .sitemenu button { animation: none; } }

@@ -88,6 +88,7 @@ export default function Page() {
   const [tRaw, setT] = useState(0);
   const [pick, setPick] = useState(null);       // {i, j, lon, lat, station?}
   const [playing, setPlaying] = useState(false);
+  const [fr, setFr] = useState(0);                 // how far playback is between the current date and the next, 0 to 1
   const [mode, setMode] = useState("total");    // "total" = change since first date, "speed" = cm per 30 days between dates
   const [ready, setReady] = useState(false);    // map style loaded (isStyleLoaded() flips false while tiles load, so track it ourselves)
   const cardRef = useRef(null);
@@ -279,6 +280,8 @@ export default function Page() {
     if (a === meta.nodata || b === meta.nodata) return null;
     return ((b - a) * meta.scale * 30) / (toDay(l.dates[k1]) - toDay(l.dates[k1 - 1]));
   };
+  // the value shown right now: during playback it is part-way between this date and the next
+  const vNow = (p) => { const a = valueAt(grid, layer, t, p); if (!fr || a === null || t >= layer.dates.length - 1) return a; const b = valueAt(grid, layer, t + 1, p); return b === null ? a : a + (b - a) * fr; };
   const lim = useMemo(() => {
     if (!layer || layer.static) return 1;
     if (!speed || !grid || grid._key !== layer.key) return Math.max(layer.p98, 0.5);
@@ -297,7 +300,7 @@ export default function Page() {
     if (!layer.static && (t + 1) * N > grid.length) return;
     const vals = new Float32Array(N);
     if (layer.static) for (let p = 0; p < N; p++) vals[p] = layer.palette === "impact" ? (grid[p] === layer.nodata ? NaN : grid[p] / layer.max) : grid[p] / 255;
-    else for (let p = 0; p < N; p++) { const v = valueAt(grid, layer, t, p); vals[p] = v === null ? NaN : v / lim; }
+    else for (let p = 0; p < N; p++) { const v = vNow(p); vals[p] = v === null ? NaN : v / lim; }
     const color = layer.static
       ? (layer.palette === "impact" ? (v) => { const q = Math.min(1, v / IMPACT_TOP); return [...ramp(RAMP.impact, q), Math.min(235, 255 * Math.max(0, q - 0.06) * 1.7)]; } : (v) => [...ramp(RAMP.coh, v), 215])
       : (v) => { const m = Math.min(1, Math.abs(v)); return [...ramp(v < 0 ? RAMP.neg : RAMP.pos, m), Math.min(232, 255 * Math.max(0, m - 0.1) * 2.3)]; };
@@ -313,7 +316,7 @@ export default function Page() {
       src = m.getSource("sar"); src._site = meta.id;
     }
     src.play(); src.pause(); m.triggerRepaint();
-  }, [meta, grid, t, layerKey, ready, mode, lim, opt.contours, opt.smooth, opt.view3d, opt.strength]);
+  }, [meta, grid, t, fr, layerKey, ready, mode, lim, opt.contours, opt.smooth, opt.view3d, opt.strength]);
   const colorCss = (v) => { const m = Math.min(1, Math.abs(v)); return `rgb(${ramp(v < 0 ? RAMP.neg : RAMP.pos, m)})`; };
 
   useEffect(() => {
@@ -330,8 +333,16 @@ export default function Page() {
 
   useEffect(() => {
     if (!playing || !layer || layer.static) return;
-    const id = setInterval(() => setT((v) => (v + 1) % layer.dates.length), { slow: 1100, normal: 600, fast: 300 }[opt.speed] || 600);
-    return () => clearInterval(id);
+    // Playback glides from one radar date to the next: the map and columns are blended between the two dates about 20 times a second.
+    const D = { slow: 1700, normal: 950, fast: 480 }[opt.speed] || 950, calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (calm) { const id = setInterval(() => setT((v) => (v + 1) % layer.dates.length), D); return () => clearInterval(id); }
+    let raf = 0, t0 = performance.now(), last = 0;
+    const tick = (now) => { const f = (now - t0) / D;
+      if (f >= 1) { t0 = now; last = now; setFr(0); setT((v) => (v + 1) % layer.dates.length); }
+      else if (now - last > 48) { last = now; setFr(f); }
+      raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(raf); setFr(0); };
   }, [playing, layerKey, meta, opt.speed]);
 
   // one pixel (or 3x3 median at a station) through time
@@ -579,7 +590,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     for (let j = 0; j < ny; j += B) for (let i = 0; i < nx; i += B) {
       let sum = 0, cnt = 0;
       for (let jj = j; jj < Math.min(ny, j + B); jj++) for (let ii = i; ii < Math.min(nx, i + B); ii++) {
-        const v = layer.static ? (grid[jj * nx + ii] === layer.nodata ? null : grid[jj * nx + ii] / layer.max) : valueAt(grid, layer, t, jj * nx + ii);
+        const v = layer.static ? (grid[jj * nx + ii] === layer.nodata ? null : grid[jj * nx + ii] / layer.max) : vNow(jj * nx + ii);
         if (v !== null) { sum += v; cnt++; }
       }
       if (!cnt) continue;
@@ -594,9 +605,9 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     // text for the number shown beside each column once you zoom in (drawn by the effect below)
     cols.forEach((q) => { const x = layer.static ? Math.round(100 * q.v) : q.v * uf;
       q.t = layer.static ? `${x}%` : `${x > 0 ? "+" : "−"}${Math.abs(x) >= 10 ? Math.abs(x).toFixed(0) : Math.abs(x).toFixed(1)} ${un}`; });
-    colsRef.current = cols; setColsVer((v) => v + 1);
+    colsRef.current = cols; if (!fr) setColsVer((v) => v + 1);
     return () => { live = false; };
-  }, [ready, opt.view3d, opt.tall, opt.inches, bars3d, meta, grid, layerKey, t, mode, lim, mPerCm]);
+  }, [ready, opt.view3d, opt.tall, opt.inches, bars3d, meta, grid, layerKey, t, fr, mode, lim, mPerCm]);
   // Numbers beside the columns. They appear once you zoom in past the opening 3D view, biggest changes first,
   // and any that would sit on top of another are left out. Zoom further and more of them fit.
   useEffect(() => {

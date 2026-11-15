@@ -293,43 +293,86 @@ export default function Page() {
   }, [meta, layerKey, t, mode, pick]);
   const copyLink = async () => { try { await navigator.clipboard.writeText(window.location.href); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setCopied(false); } };
 
-  // Guided tour: each step names the view it wants; an effect moves the app there as data arrives.
+  // Guided tour: each step names the view it wants and what to point at; effects move the app there.
   const steps = useMemo(() => {
     if (!meta) return [];
     const hasS1 = meta.layers.some((l) => l.sensor === "s1" && l.kind === "up"), st = ctx?.gnss?.stations?.[0];
     const main = meta.default_layer && meta.layers.find((l) => l.key === meta.default_layer) ? meta.default_layer : "up";
+    const cm = (v) => `${Math.abs(v).toFixed(1)} cm`, lo = (o) => (o && Object.values(o).length ? Math.min(...Object.values(o)) : null);
     if (meta.event) return [
-      { say: `${meta.story} Pink marks where the ground surface looked different to the radar after the storm than before it.`, layer: main },
-      { say: "This is the spot in the yellow box that changed the most. The chart shows the radar signal holding steady through the calm weeks, then dropping across the storm.", layer: main, pick: "hot" },
-      { say: "The rain and wind charts below mark the day the storm arrived, so you can line the weather up with the change.", layer: main, pick: "hot", scroll: "weather" },
-      { say: "What this cannot tell you: pink means the surface changed, not that something was destroyed. Tides, crops and wet soil also change the signal, and open water gives no reading.", layer: main, notes: true },
+      { icon: "🌀", title: "Before and after the storm", layer: main, point: "box", label: "Coast around Destin",
+        say: () => `Pink marks ground that looked different to the radar after ${meta.event.name} than in the calm weeks before it.` },
+      { icon: "🎯", title: "The most changed spot", layer: main, pick: "hot", point: "hot", label: "Most changed", glow: "pickcard",
+        say: (d) => d.hot ? `Here the radar lost ${Math.round(100 * d.hot.v)}% of its usual signal. In the chart, the lines stay level through the calm passes, then drop at the yellow storm line.` : "Finding the most changed spot…" },
+      { icon: "🌧️", title: "Line it up with the weather", layer: main, pick: "hot", point: "hot", label: "Same spot", glow: "weather",
+        say: (d) => `The rain and wind charts carry the same yellow line. ${d.share !== null ? `Across the yellow box, ${Math.round(100 * d.share)}% of the ground changed by more than 30%. ` : ""}Pink means changed, not destroyed: tides and wet soil count too.` },
     ];
     return [
-      { say: `${meta.story} Red is moving down, blue is moving up. Watch it build up pass by pass.`, layer: "up", mode: "total", play: true },
-      { say: "This is the spot in the yellow box that moved the most. Every point on the chart is one pass of the satellite, 12 days apart.", layer: "up", mode: "total", pick: "hot" },
-      { say: "Speed shows when it moved fastest. Compare the timing with the rainfall chart below.", layer: "up", mode: "speed", pick: "hot" },
-      ...(hasS1 ? [{ say: "An older radar, Sentinel-1, looked at the same place with a much shorter wavelength. Blank patches are where it lost track of the ground.", layer: "s1_up", mode: "total" }] : []),
-      ...(st ? [{ say: `A check against the ground: GPS station ${st.id} measured the same motion from a fixed antenna. The two should agree closely.`, layer: "up", mode: "total", station: st }] : []),
-      { say: "What this cannot see: motion along the north-south direction is mostly invisible to the radar, and these are early products NASA has not finished validating.", layer: "up", mode: "total", notes: true },
+      { icon: "▶️", title: "Watch it move", layer: "up", mode: "total", play: true, point: "timebar", label: "One step = 12 days",
+        say: () => `${meta.story} Red is sinking, blue is rising.` },
+      { icon: "🎯", title: "The fastest spot", layer: "up", mode: "total", pick: "hot", point: "hot", label: "Moved the most", glow: "pickcard",
+        say: (d) => d.hot ? `This spot went ${d.hot.v < 0 ? "down" : "up"} ${cm(d.hot.v)} between ${fmtDate(d.layer.dates[0])} and ${fmtDate(d.layer.dates[d.layer.dates.length - 1])}. Each dot on the chart is one satellite pass.` : "Finding the fastest spot…" },
+      { icon: "🌧️", title: "Rain, then speed", layer: "up", mode: "speed", pick: "hot", point: "hot", label: "Same spot, now speed", glow: "weather",
+        say: () => "Now the chart shows speed in cm per month. Compare its peaks with the rainfall bars below it." },
+      ...(hasS1 ? [{ icon: "📡", title: "Old radar, new radar", layer: "s1_up", mode: "total", point: "box", label: "Blank = lost track", glow: "coverage",
+        say: (d) => { const a = lo(d.cov?.nisar), c = lo(d.cov?.s1); return `This is Sentinel-1, whose 5.5 cm wavelength is a quarter of NISAR's.${a !== null && c !== null ? ` In the yellow box it kept a reading on ${Math.round(100 * c)}% of the ground; NISAR kept ${Math.round(100 * a)}%.` : ""}`; } }] : []),
+      ...(st ? [{ icon: "✅", title: "Checked on the ground", layer: "up", mode: "total", station: st, point: "station", label: `GPS ${st.id}`, glow: "pickcard", notes: true,
+        say: (d) => `A fixed GPS antenna measured the same ground.${d.stat ? ` Radar and GPS differ by ${d.stat.rms.toFixed(2)} cm on average here.` : ""} One limit to know: north-south motion is mostly invisible to this radar.` }] : []),
     ];
   }, [meta, ctx]);
   const step = tour && steps[tour.i];
+  const fitSite = (duration) => {
+    if (!meta || !map.current) return;
+    const [w, s, e, n] = meta.bbox, phone = window.innerWidth <= 800;
+    map.current.fitBounds([[w, s], [e, n]], { padding: { top: phone ? 48 : 40, bottom: 120, left: phone ? 16 : 40, right: phone ? 16 : 40 }, duration, essential: true });
+  };
+  const tourMark = useRef(null), wasTouring = useRef(false);
   useEffect(() => {
     if (!step || !meta || !layer) return;
     if (layer.key !== step.layer && meta.layers.find((l) => l.key === step.layer)) { setPlaying(false); setLayerKey(step.layer); return; }
     if (step.mode && mode !== step.mode) { setMode(step.mode); return; }
     if (!grid || grid._key !== layer.key) return;
     setPlaying(!!step.play);
-    if (!layer.static) setT(step.play ? 0 : layer.dates.length - 1);
+    const last = layer.static ? 0 : layer.dates.length - 1;
+    if (!layer.static) setT(step.play ? 0 : last);
+    // a play tick can still land after this; settle on the last date once the animation timer is gone
+    const settle = !step.play && !layer.static ? setTimeout(() => setT(last), 750) : null;
     setNotesOpen(!!step.notes);
     if (step.pick === "hot" && hot) setPick({ i: hot.i, j: hot.j, lon: hot.lon, lat: hot.lat });
     else if (step.station) { const p = toPixel(step.station.lon, step.station.lat); if (p) setPick({ ...p, station: step.station.id }); }
     else if (!step.pick) setPick(null);
-    if (step.scroll) setTimeout(() => document.getElementById(step.scroll)?.scrollIntoView({ behavior: "smooth", block: "center" }), 300);
+    return () => clearTimeout(settle);
   }, [tour?.i, step, layerKey, grid, mode, hot === null]);
+
+  // Tour pointers: a bouncing arrow on the map, a camera move, and a soft glow on the card being described.
+  useEffect(() => {
+    tourMark.current?.remove(); tourMark.current = null;
+    document.querySelectorAll(".spot").forEach((el) => el.classList.remove("spot"));
+    if (!step || !meta || !map.current || !ready) { if (wasTouring.current) { wasTouring.current = false; fitSite(900); } return; }
+    wasTouring.current = true;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches, dur = calm ? 0 : 1300;
+    let at = null;
+    if (step.point === "hot" && hot) at = [hot.lon, hot.lat];
+    else if (step.point === "station" && step.station) at = [step.station.lon, step.station.lat];
+    else if (step.point === "box" && meta.focus_box) at = [(meta.focus_box[0] + meta.focus_box[2]) / 2, meta.focus_box[3]];
+    if (at) {
+      const el = document.createElement("div");          // MapLibre positions this element with a transform, so animate an inner one
+      el.innerHTML = `<div class="tourmark"><span></span><svg viewBox="0 0 24 30" width="26" height="32" aria-hidden="true"><path d="M12 29 L2 15 H8.5 V1 H15.5 V15 H22 Z" fill="#eda100" stroke="#1a1a19" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`;
+      el.querySelector("span").textContent = step.label || "";
+      tourMark.current = new maplibregl.Marker({ element: el, anchor: "bottom", offset: [0, step.point === "box" ? 0 : -14] }).setLngLat(at).addTo(map.current);
+      if (step.point === "box") fitSite(dur);
+      else { const z = map.current.cameraForBounds([[meta.bbox[0], meta.bbox[1]], [meta.bbox[2], meta.bbox[3]]])?.zoom ?? map.current.getZoom(); map.current.easeTo({ center: at, zoom: Math.min(z + 0.6, 15), duration: dur, padding: { bottom: 110, top: 30, left: 0, right: 0 }, essential: true }); }
+    } else fitSite(dur);
+    const t1 = step.glow && setTimeout(() => {
+      const card = document.getElementById(step.glow); if (!card) return;
+      card.classList.add("spot");
+      if (window.innerWidth > 800) card.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "nearest" });
+    }, 500);
+    return () => clearTimeout(t1);
+  }, [tour?.i, step, ready, hot?.i, hot?.j, layerKey]);
   useEffect(() => {
     if (!tour?.auto) return;
-    const id = setTimeout(() => setTour((v) => (v && v.i < steps.length - 1 ? { ...v, i: v.i + 1 } : null)), 8000);
+    const id = setTimeout(() => setTour((v) => (v && v.i < steps.length - 1 ? { ...v, i: v.i + 1 } : null)), 7000);
     return () => clearTimeout(id);
   }, [tour, steps.length]);
   useEffect(() => { setTour(null); }, [siteId]);
@@ -357,7 +400,8 @@ export default function Page() {
         <div ref={mapDiv} />
         {meta && layer && (
           <div className="timebar">
-            {!pick && grid && <div className="hint">Tap the map to read one spot</div>}
+            {step?.point === "timebar" && <div className="tourtip"><span>{step.label}</span><svg viewBox="0 0 24 30" width="22" height="27" aria-hidden="true"><path d="M12 29 L2 15 H8.5 V1 H15.5 V15 H22 Z" fill="#eda100" stroke="#1a1a19" strokeWidth="1.5" strokeLinejoin="round" /></svg></div>}
+            {!pick && grid && !step && <div className="hint">Tap the map to read one spot</div>}
             {!grid && <div className="hint">Loading…</div>}
             {!layer.static ? (<>
               <div className="trow">
@@ -390,14 +434,20 @@ export default function Page() {
           )}
         </header>
         {step && (
-          <div className="tour" role="region" aria-label="Guided tour" key={tour.i}>
-            <div className="tourtop"><b>Step {tour.i + 1} of {steps.length}</b>
-              <label className="auto"><input type="checkbox" checked={tour.auto} onChange={(e) => setTour({ ...tour, auto: e.target.checked })} /> Auto-advance</label></div>
-            <p>{step.say}</p>
-            {tour.auto && <div className="tourbar"><i /></div>}
+          <div className="tour" role="region" aria-label="Guided tour">
+            <div className="tourtop">
+              <div className="dots" aria-label={`Step ${tour.i + 1} of ${steps.length}`}>{steps.map((_, k) => <i key={k} className={k === tour.i ? "on" : k < tour.i ? "done" : ""} />)}</div>
+              <label className="auto"><input type="checkbox" checked={tour.auto} onChange={(e) => setTour({ ...tour, auto: e.target.checked })} /> Auto-advance</label>
+            </div>
+            <div className="tourbody" key={tour.i}>
+              <h3><span className="ticon" aria-hidden="true">{step.icon}</span>{step.title}</h3>
+              <p>{step.say({ hot, layer, cov, share: hot?.share ?? null, stat: chart?.stat })}</p>
+              {step.glow && <div className="cue"><span aria-hidden="true">👇</span> {step.glow === "weather" ? "See the weather charts" : step.glow === "coverage" ? "See the coverage numbers" : "See the chart"} {typeof window !== "undefined" && window.innerWidth <= 800 ? "below" : "highlighted below"}</div>}
+            </div>
+            {tour.auto && <div className="tourbar" key={`b${tour.i}`}><i /></div>}
             <div className="tourbtns">
               <button className="ghost" disabled={tour.i === 0} onClick={() => setTour({ ...tour, i: tour.i - 1 })}>Back</button>
-              {tour.i < steps.length - 1 ? <button className="cta" onClick={() => setTour({ ...tour, i: tour.i + 1 })}>Next</button> : <button className="cta" onClick={() => setTour(null)}>Finish</button>}
+              {tour.i < steps.length - 1 ? <button className="cta" onClick={() => setTour({ ...tour, i: tour.i + 1 })}>Next <span aria-hidden="true">→</span></button> : <button className="cta" onClick={() => setTour(null)}>Finish <span aria-hidden="true">✓</span></button>}
               <button className="ghost" onClick={() => setTour(null)}>Exit</button>
             </div>
           </div>
@@ -441,7 +491,7 @@ export default function Page() {
               <button className={speed ? "on" : ""} aria-pressed={speed} onClick={() => setMode("speed")}><span aria-hidden="true">⏱️</span> Speed</button>
             </div>
           )}
-          <div className="card" ref={cardRef}>
+          <div className="card" id="pickcard" ref={cardRef}>
             <h2><span aria-hidden="true">📍</span> {pick ? (pick.station ? `Ground check at station ${pick.station}` : `Spot at ${pick.lat.toFixed(4)}, ${pick.lon.toFixed(4)}`) : "Pick a spot"}</h2>
             <p className="muted" style={{ margin: "0 0 8px" }}>{layer.static ? (pick ? "Radar signal quality for each pair of passes (1 = surface unchanged, 0 = changed completely)." : "Tap the map to see how the radar signal held up at that spot.") : pick ? `${kindName} ${speed ? "speed, cm per month" : "motion, cm"}` : "Tap the map, or a labelled GPS station, to see how that spot moved."}</p>
             {isImpact && pickVal !== null && <div className="hero" key={`${pick.i}-${pick.j}`}>{pickVal === layer.nodata ? "No reading" : `${Math.round((100 * pickVal) / layer.max)}%`}<small> {pickVal === layer.nodata ? "here (water, or never a stable signal)" : "of the usual signal lost across the storm"}</small></div>}
@@ -491,7 +541,7 @@ export default function Page() {
             </div>
           )}
           {cov && !meta.event && (
-            <div className="card">
+            <div className="card" id="coverage">
               <h2><span aria-hidden="true">🎯</span> How much of the focus area each radar could measure</h2>
               <p className="muted" style={{ margin: "0 0 10px" }}>Share of pixels in the yellow box with a reading on every date.</p>
               <div className="tiles">

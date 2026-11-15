@@ -8,7 +8,7 @@ from pyproj import Transformer
 
 out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
 site = sys.argv[2]
-BOX = {"portuguese-bend": (-118.420, 33.715, -118.320, 33.790, [(34, "A", 18), (13, "D", 72)]),
+BOX = {"portuguese-bend": (-118.420, 33.715, -118.320, 33.790, [(34, "A", 19), (13, "D", 72)]),
        "central-valley": (-119.750, 36.000, -119.400, 36.250, [(34, "A", 20), (114, "D", 70)]),
        "destin": (-86.750, 30.330, -86.300, 30.550, [(76, "A", 17), (127, "D", 73)])}[site]
 W, S, E, N, tracks = BOX

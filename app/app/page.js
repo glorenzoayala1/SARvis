@@ -19,8 +19,8 @@ const ramp = (stops, v) => { for (let k = 1; k < stops.length; k++) if (v <= sto
 const css = (stops) => stops.map(([t, c]) => `rgb(${c}) ${Math.round(t * 100)}%`).join(", ");
 const niceStep = (x) => { const p = Math.pow(10, Math.floor(Math.log10(x))), m = x / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; };
 // Draw a value grid (NaN = no reading) onto a canvas at S times the resolution, blending between pixel centres.
-function drawField(c, vals, nx, ny, color, contour) {
-  const S = nx * ny > 90000 ? 2 : 3, W = nx * S, H = ny * S;
+function drawField(c, vals, nx, ny, color, contour, smooth = true) {
+  const S = !smooth ? 1 : nx * ny > 90000 ? 2 : 3, W = nx * S, H = ny * S;
   c.width = W; c.height = H;
   const g = c.getContext("2d"), img = g.createImageData(W, H), out = img.data, up = new Float32Array(W * H);
   for (let Y = 0; Y < H; Y++) {
@@ -84,7 +84,13 @@ export default function Page() {
   const [sig, setSig] = useState(null);         // per-pass signal quality arrays {asc, desc}
   const [tour, setTour] = useState(null);       // {i, auto} while the guided tour runs
   const [copied, setCopied] = useState(false);
-  const [base, setBase] = useState("sat");     // "dark" map or "sat" satellite photo
+  const DEFAULTS = { base: "sat", view3d: false, contours: true, labels: true, smooth: true, boxes: true, stations: true, inches: false, speed: "normal", tall: "medium" };
+  const [opt, setOpt] = useState(DEFAULTS);
+  const [showSettings, setShowSettings] = useState(false);
+  useEffect(() => { try { const o = JSON.parse(window.localStorage.getItem("sarvis-options") || "null"); if (o) setOpt({ ...DEFAULTS, ...o, view3d: false }); } catch {} }, []);
+  const set = (patch) => setOpt((o) => { const n = { ...o, ...patch }; try { window.localStorage.setItem("sarvis-options", JSON.stringify(n)); } catch {} return n; });
+  const base = opt.base, setBase = (b) => set({ base: b });
+  const uf = opt.inches ? 1 / 2.54 : 1, un = opt.inches ? "in" : "cm";      // data stay in cm; only the display converts
   const [notesOpen, setNotesOpen] = useState(false);
   const want = useRef(null);                    // state requested by the page link (#site=...&layer=...), applied as data loads
   const firstFit = useRef(true);
@@ -131,7 +137,7 @@ export default function Page() {
     map.current = new maplibregl.Map({
       container: mapDiv.current,
       style: "https://tiles.openfreemap.org/styles/dark",      // free vector map, no key (OpenFreeMap / OpenStreetMap)
-      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, pitchWithRotate: false,
+      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 70,
     });
     map.current.touchZoomRotate.disableRotation();
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
@@ -141,7 +147,7 @@ export default function Page() {
       if (m.getSource("sat")) return;
       top.current = m.getStyle().layers.find((l) => l.type === "symbol")?.id;      // keep place names above everything we add
       m.addSource("sat", { type: "raster", tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 16, attribution: "Imagery: USGS The National Map" });
-      m.addLayer({ id: "base-sat", type: "raster", source: "sat", layout: { visibility: "none" }, paint: { "raster-brightness-max": 0.78, "raster-saturation": -0.2 } }, top.current);
+      m.addLayer({ id: "base-sat", type: "raster", source: "sat", paint: { "raster-brightness-max": 0.78, "raster-saturation": -0.2, "raster-opacity": 0, "raster-opacity-transition": { duration: 900, delay: 0 } } }, top.current);
       // Make place names readable over imagery and the radar layer, whatever the style's own colours are.
       m.getStyle().layers.filter((l) => l.type === "symbol").forEach((l) => {
         try {
@@ -155,6 +161,7 @@ export default function Page() {
         } catch {}
       });
       roads.current = m.getStyle().layers.filter((l) => l.type === "line" && l["source-layer"] === "transportation").map((l) => l.id);
+      roads.current.forEach((id) => { try { m.setPaintProperty(id, "line-color-transition", { duration: 900, delay: 0 }); } catch {} });
       setReady(true);
     };
     m.on("load", setup);
@@ -200,13 +207,15 @@ export default function Page() {
   // GPS / survey stations as clickable markers
   useEffect(() => {
     marks.current.forEach((k) => k.remove()); marks.current = [];
-    if (!meta || !ctx?.gnss || !map.current) return;
+    if (!meta || !ctx?.gnss || !map.current || !opt.stations) return;
     ctx.gnss.stations.forEach((st) => {
       const el = document.createElement("button"); el.className = "station"; el.textContent = st.id; el.title = `${st.kind === "survey" ? "Survey point" : "GPS station"} ${st.id}`;
       el.onclick = (ev) => { ev.stopPropagation(); const p = toPixel(st.lon, st.lat); if (p) setPick({ ...p, station: st.id }); };
       marks.current.push(new maplibregl.Marker({ element: el }).setLngLat([st.lon, st.lat]).addTo(map.current));
     });
-  }, [meta, ctx]);
+  }, [meta, ctx, opt.stations]);
+  useEffect(() => { if (ready && map.current?.getLayer("boxes")) map.current.setLayoutProperty("boxes", "visibility", opt.boxes ? "visible" : "none"); }, [opt.boxes, ready, meta]);
+
 
   const speed = mode === "speed" && layer && !layer.static;
   // value shown at date index k for flat pixel index p: running total, or speed since the previous date
@@ -226,8 +235,9 @@ export default function Page() {
     v.sort((a, b) => a - b);
     return Math.max(v[Math.floor(v.length * 0.98)] || 0.5, 0.5);
   }, [layer, grid, speed, meta]);
-  const contourStep = niceStep(lim / 4);
-  const unit = speed ? "cm/month" : "cm";
+  const contourStep = niceStep((lim * uf) / 4) / uf;          // even steps in whichever unit is displayed
+  const unit = speed ? `${un}/month` : un;
+  const bars3d = !!layer && (!layer.static || layer.palette === "impact");
 
   useEffect(() => {
     if (!meta || !grid || !layer || !map.current || !ready || grid._key !== layer.key) return;
@@ -239,23 +249,24 @@ export default function Page() {
     const color = layer.static
       ? (layer.palette === "impact" ? (v) => [...ramp(RAMP.impact, v), Math.min(235, 255 * Math.max(0, v - 0.06) * 1.7)] : (v) => [...ramp(RAMP.coh, v), 215])
       : (v) => { const m = Math.min(1, Math.abs(v)); return [...ramp(v < 0 ? RAMP.neg : RAMP.pos, m), Math.min(232, 255 * Math.max(0, m - 0.1) * 2.3)]; };
-    drawField(c, vals, nx, ny, color, layer.static ? 0 : contourStep / lim);
+    drawField(c, vals, nx, ny, color, layer.static || !opt.contours ? 0 : contourStep / lim, opt.smooth);
+    if (map.current.getLayer("sar")) { map.current.setPaintProperty("sar", "raster-resampling", opt.smooth ? "linear" : "nearest"); map.current.setLayoutProperty("sar", "visibility", opt.view3d && bars3d ? "none" : "visible"); }
     // A canvas source repaints straight from the canvas: no image decode, no aborted loads while scrubbing.
     const [w, s, e, n] = meta.bbox, coords = [[w, n], [e, n], [e, s], [w, s]], m = map.current;
     let src = m.getSource("sar");
     if (src && src._site !== meta.id) { m.removeLayer("sar"); m.removeSource("sar"); src = null; }      // canvas size changes with the site
     if (!src) {
       m.addSource("sar", { type: "canvas", canvas: c, coordinates: coords, animate: false });
-      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": "linear", "raster-fade-duration": 0 } }, m.getLayer("boxes") ? "boxes" : top.current);
+      m.addLayer({ id: "sar", type: "raster", source: "sar", layout: { visibility: opt.view3d && bars3d ? "none" : "visible" }, paint: { "raster-resampling": opt.smooth ? "linear" : "nearest", "raster-fade-duration": 0 } }, m.getLayer("boxes") ? "boxes" : top.current);
       src = m.getSource("sar"); src._site = meta.id;
     }
     src.play(); src.pause(); m.triggerRepaint();
-  }, [meta, grid, t, layerKey, ready, mode, lim]);
+  }, [meta, grid, t, layerKey, ready, mode, lim, opt.contours, opt.smooth, opt.view3d]);
   const colorCss = (v) => { const m = Math.min(1, Math.abs(v)); return `rgb(${ramp(v < 0 ? RAMP.neg : RAMP.pos, m)})`; };
 
   useEffect(() => {
     if (!ready || !map.current) return;
-    map.current.setLayoutProperty("base-sat", "visibility", base === "sat" ? "visible" : "none");
+    map.current.setPaintProperty("base-sat", "raster-opacity", base === "sat" ? 1 : 0);        // cross-fades between the two backgrounds
     roads.current.forEach((id) => { try { map.current.setPaintProperty(id, "line-color", base === "sat" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.12)"); } catch {} });
   }, [base, ready]);
   const pin = useRef(null);
@@ -266,9 +277,9 @@ export default function Page() {
 
   useEffect(() => {
     if (!playing || !layer || layer.static) return;
-    const id = setInterval(() => setT((v) => (v + 1) % layer.dates.length), 600);
+    const id = setInterval(() => setT((v) => (v + 1) % layer.dates.length), { slow: 1100, normal: 600, fast: 300 }[opt.speed] || 600);
     return () => clearInterval(id);
-  }, [playing, layerKey, meta]);
+  }, [playing, layerKey, meta, opt.speed]);
 
   // one pixel (or 3x3 median at a station) through time
   const seriesAt = (g, l, p, win) => l.dates.map((d, k) => {
@@ -369,7 +380,7 @@ export default function Page() {
     if (!meta) return [];
     const hasS1 = meta.layers.some((l) => l.sensor === "s1" && l.kind === "up"), st = ctx?.gnss?.stations?.[0];
     const main = meta.default_layer && meta.layers.find((l) => l.key === meta.default_layer) ? meta.default_layer : "up";
-    const cm = (v) => `${Math.abs(v).toFixed(1)} cm`, lo = (o) => (o && Object.values(o).length ? Math.min(...Object.values(o)) : null);
+    const cm = (v) => `${Math.abs(v * uf).toFixed(1)} ${un}`, lo = (o) => (o && Object.values(o).length ? Math.min(...Object.values(o)) : null);
     if (meta.event) return [
       { title: "Before and after the storm", layer: main, point: "box", label: "Coast around Destin",
         say: () => `Pink marks ground that looked different to the radar after ${meta.event.name} than in the calm weeks before it.` },
@@ -385,12 +396,12 @@ export default function Page() {
         say: (d) => d.hot ? `This spot went ${d.hot.v < 0 ? "down" : "up"} ${cm(d.hot.v)} between ${fmtDate(d.layer.dates[0])} and ${fmtDate(d.layer.dates[d.layer.dates.length - 1])}. Each dot on the chart is one satellite pass.` : "Finding the fastest spot…" },
       { title: "Rain, then speed", layer: "up", mode: "speed", pick: "hot", point: "hot", label: "Same spot, now speed", glow: "weather",
         say: () => "Now the chart shows speed in cm per month. Compare its peaks with the rainfall bars below it." },
-      ...(hasS1 ? [{ title: "Old radar, new radar", layer: "s1_up", mode: "total", point: "box", label: "Blank = lost track", glow: "coverage",
-        say: (d) => { const a = lo(d.cov?.nisar), c = lo(d.cov?.s1); return `This is Sentinel-1, whose 5.5 cm wavelength is a quarter of NISAR's.${a !== null && c !== null ? ` In the yellow box it kept a reading on ${Math.round(100 * c)}% of the ground; NISAR kept ${Math.round(100 * a)}%.` : ""}`; } }] : []),
+      ...(hasS1 ? [{ title: "Old radar, new radar", layer: "s1_up", mode: "total", point: "box", label: "Blank = no reading", glow: "coverage",
+        say: (d) => { const a = lo(d.cov?.nisar), c = lo(d.cov?.s1); return `This is Sentinel-1, whose 5.5 cm wavelength is a quarter of NISAR's.${a !== null && c !== null ? ` Over the same weeks it got a usable reading in the yellow box on ${Math.round(100 * c)}% of passes; NISAR managed ${Math.round(100 * a)}%.` : ""}`; } }] : []),
       ...(st ? [{ title: "Checked on the ground", layer: "up", mode: "total", station: st, point: "station", label: `GPS ${st.id}`, glow: "pickcard", notes: true,
         say: (d) => `A fixed GPS antenna measured the same ground.${d.stat ? ` Radar and GPS differ by ${d.stat.rms.toFixed(2)} cm on average here.` : ""} One limit to know: north-south motion is mostly invisible to this radar.` }] : []),
     ];
-  }, [meta, ctx]);
+  }, [meta, ctx, opt.inches]);
   const step = tour && steps[tour.i];
   const fitSite = (duration) => {
     if (!meta || !map.current) return;
@@ -479,13 +490,48 @@ export default function Page() {
       m.addLayer({ id: "slice", type: "line", source: "slice", paint: { "line-color": "#f0efec", "line-width": 1.6 } }, top.current); }
   }, [sliceOk, pick?.i, pick?.j, sliceDir, ready, meta]);
 
+  // 3D view: each block of pixels becomes a column whose height is the size of the change, so the
+  // shape grows as the timeline plays. Height shows amount of change, not real elevation.
+  useEffect(() => {
+    const m = map.current; if (!m || !ready) return;
+    const on = opt.view3d && bars3d && meta && grid && layer && grid._key === layer.key;
+    let fc = { type: "FeatureCollection", features: [] };
+    if (on) {
+      const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 4500)));
+      const widthM = (e - w) * 111320 * Math.cos((((s + n) / 2) * Math.PI) / 180), top3 = widthM * { low: 0.1, medium: 0.2, high: 0.35 }[opt.tall];
+      const dx = (e - w) / nx, dy = (n - s) / ny;
+      for (let j = 0; j < ny; j += B) for (let i = 0; i < nx; i += B) {
+        let sum = 0, cnt = 0;
+        for (let jj = j; jj < Math.min(ny, j + B); jj++) for (let ii = i; ii < Math.min(nx, i + B); ii++) {
+          const v = layer.static ? (grid[jj * nx + ii] === layer.nodata ? null : grid[jj * nx + ii] / layer.max) : valueAt(grid, layer, t, jj * nx + ii);
+          if (v !== null) { sum += v; cnt++; }
+        }
+        if (!cnt) continue;
+        const v = sum / cnt, k = layer.static ? v : v / lim, mag = Math.min(1.3, Math.abs(k)); if (mag < 0.15) continue;          // leave out near-zero noise
+        const x0 = w + i * dx, x1 = w + Math.min(nx, i + B) * dx, y0 = n - j * dy, y1 = n - Math.min(ny, j + B) * dy;
+        fc.features.push({ type: "Feature", properties: { h: mag * top3, c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, mag))})` },
+          geometry: { type: "Polygon", coordinates: [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]] } });
+      }
+    }
+    if (m.getSource("bars")) m.getSource("bars").setData(fc);
+    else { m.addSource("bars", { type: "geojson", data: fc });
+      m.addLayer({ id: "bars", type: "fill-extrusion", source: "bars", paint: { "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.92, "fill-extrusion-vertical-gradient": true } }, top.current); }
+  }, [ready, opt.view3d, opt.tall, bars3d, meta, grid, layerKey, t, mode, lim]);
+  useEffect(() => {            // tilt the camera in and out of 3D
+    const m = map.current; if (!m || !ready) return;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (opt.view3d) { m.dragRotate.enable(); m.touchZoomRotate.enableRotation(); m.easeTo({ pitch: 58, bearing: -24, duration: calm ? 0 : 1400, essential: true }); }
+    else { m.dragRotate.disable(); m.touchZoomRotate.disableRotation(); m.easeTo({ pitch: 0, bearing: 0, duration: calm ? 0 : 900, essential: true }); }
+  }, [opt.view3d, ready]);
+  useEffect(() => { if (tour && opt.view3d) set({ view3d: false }); }, [tour]);
+
   // Soft value labels on the map: walk outward from the biggest change in three directions and
   // drop a number wherever the surface crosses one of the contour levels.
   const valMarks = useRef([]);
   useEffect(() => {
     valMarks.current.forEach((k) => k.remove()); valMarks.current = [];
     const m = map.current;
-    if (!m || !ready || !meta || !grid || !layer || layer.static || grid._key !== layer.key || !hot) return;
+    if (!m || !ready || !meta || !grid || !layer || layer.static || grid._key !== layer.key || !hot || !opt.labels || opt.view3d) return;
     const [w, s, e, n] = meta.bbox, { nx, ny } = meta, out = [];
     const put = (i, j, text, peak) => { const el = document.createElement("div"); el.className = "vlabel" + (peak ? " peak" : ""); el.textContent = text;
       valMarks.current.push(new maplibregl.Marker({ element: el }).setLngLat([w + ((i + 0.5) / nx) * (e - w), n - ((j + 0.5) / ny) * (n - s)]).addTo(m)); };
@@ -499,15 +545,17 @@ export default function Page() {
         const band = Math.floor(v / contourStep);
         if (prev !== null && band !== prev && r - last >= Math.max(6, Math.min(nx, ny) / 14)) {
           const level = Math.max(band, prev) * contourStep;
-          if (Math.abs(level) > 1e-9) { out.push([i, j, fmt(level)]); last = r; placed++; }
+          if (Math.abs(level) > 1e-9) { out.push([i, j, fmt(Math.round(level * uf * 100) / 100)]); last = r; placed++; }
         }
         prev = band;
       }
     }
-    out.forEach(([i, j, text]) => put(i, j, text, false));
+    // keep labels apart on screen so they never pile up on a small map
+    const px = (i, j) => m.project([w + ((i + 0.5) / nx) * (e - w), n - ((j + 0.5) / ny) * (n - s)]), used = [px(hot.i, hot.j)];
+    out.forEach(([i, j, text]) => { const q = px(i, j); if (used.every((u) => Math.hypot(u.x - q.x, u.y - q.y) >= 44)) { used.push(q); put(i, j, text, false); } });
     const pk = valueAt(grid, layer, t, hot.j * nx + hot.i);
-    if (pk !== null && Math.abs(pk) >= contourStep / 2 && !(pick && pick.i === hot.i && pick.j === hot.j)) put(hot.i, hot.j, `${fmt(pk)} ${unit}`, true);
-  }, [ready, meta, grid, layerKey, t, mode, hot?.i, hot?.j, contourStep, pick?.i, pick?.j]);
+    if (pk !== null && Math.abs(pk) >= contourStep / 2 && !(pick && pick.i === hot.i && pick.j === hot.j)) put(hot.i, hot.j, `${fmt(Math.round(pk * uf * 10) / 10)} ${unit}`, true);
+  }, [ready, meta, grid, layerKey, t, mode, hot?.i, hot?.j, contourStep, pick?.i, pick?.j, opt.labels, opt.view3d, opt.inches]);
 
   const cov = ctx?.coverage;
   const SENSORS = [["nisar", "NISAR", "L-band"], ["s1", "Sentinel-1", "C-band"]];
@@ -523,7 +571,7 @@ export default function Page() {
   const ends = layer && ENDS[layer.kind];
   const cur = chart && chart.lines[0].pts.find((p) => p.d === layer.dates[t]);
   const SENS = SENSORS.filter(([k]) => meta?.layers.some((l) => (l.sensor || "nisar") === k));
-  const fmtCm = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)} ${unit}`;
+  const fmtCm = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v * uf).toFixed(1)} ${unit}`;
 
   return (
     <div className="shell">
@@ -532,6 +580,9 @@ export default function Page() {
         <div className="basesw" role="group" aria-label="Background">
           <button className={base === "dark" ? "on" : ""} aria-pressed={base === "dark"} onClick={() => setBase("dark")}>Map</button>
           <button className={base === "sat" ? "on" : ""} aria-pressed={base === "sat"} onClick={() => setBase("sat")}>Satellite</button>
+          <span className="sep" />
+          <button className={!opt.view3d ? "on" : ""} aria-pressed={!opt.view3d} onClick={() => set({ view3d: false })}>2D</button>
+          <button className={opt.view3d ? "on" : ""} aria-pressed={opt.view3d} disabled={!bars3d} onClick={() => { setTour(null); set({ view3d: true }); }}>3D</button>
         </div>
         {meta && layer && (
           <div className="timebar">
@@ -545,7 +596,7 @@ export default function Page() {
                 <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
               </div>
               <div className="ramp" style={{ background: `linear-gradient(90deg, ${css([...RAMP.neg].reverse().map(([t, c]) => [(1 - t) / 2, c]))}, rgba(120,120,116,0.25) 50%, ${css(RAMP.pos.map(([t, c]) => [0.5 + t / 2, c]))})` }} />
-              <div className="row"><span>−{lim.toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span className="blank">lines every {contourStep} {unit} · see-through = no reading</span><span>+{lim.toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
+              <div className="row"><span>−{(lim * uf).toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span className="blank">{opt.view3d && bars3d ? "height = size of change, stretched" : `${opt.contours ? `lines every ${Math.round(contourStep * uf * 100) / 100} ${unit} · ` : ""}see-through = no reading`}</span><span>+{(lim * uf).toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
             </>) : isImpact ? (<>
               <div className="trow one"><div className="tdate"><span className="muted">before and after</span><b>{meta.event?.name || "Event"}</b></div></div>
               <div className="ramp" style={{ background: `linear-gradient(90deg, rgba(246,200,216,0.08), ${css(RAMP.impact)})` }} />
@@ -564,10 +615,32 @@ export default function Page() {
           {meta && layer && (
             <div className="actions hide-on-tour">
               <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Take the tour</button>
+              <button className="ghost" aria-expanded={showSettings} onClick={() => setShowSettings((v) => !v)}>Settings</button>
               <button className="ghost" onClick={copyLink}>{copied ? "Link copied" : "Copy link to this view"}</button>
             </div>
           )}
         </header>
+        {showSettings && !step && (
+          <div className="card settings" role="region" aria-label="Settings">
+            <div className="shead"><h2>Settings</h2><button className="ghost small" onClick={() => setShowSettings(false)}>Close</button></div>
+            <h3>Where to look</h3>
+            <label htmlFor="s-site">Site</label>
+            <select id="s-site" value={siteId || ""} onChange={(e) => setSiteId(e.target.value)}>{sites.map((st) => <option key={st.id} value={st.id}>{st.short || st.id}</option>)}</select>
+            <Pick label="Background" value={opt.base} onChange={(v) => set({ base: v })} items={[["sat", "Satellite"], ["dark", "Map"]]} />
+            <Pick label="View" value={opt.view3d ? "3d" : "2d"} onChange={(v) => { if (v === "3d") setTour(null); set({ view3d: v === "3d" }); }} items={[["2d", "Flat"], ["3d", "3D columns"]]} />
+            <Pick label="3D height" value={opt.tall} onChange={(v) => set({ tall: v })} items={[["low", "Low"], ["medium", "Medium"], ["high", "High"]]} />
+            <h3>On the map</h3>
+            <Toggle label="Smooth shading" hint="Off shows the raw 80 m pixels" on={opt.smooth} onChange={(v) => set({ smooth: v })} />
+            <Toggle label="Contour lines" on={opt.contours} onChange={(v) => set({ contours: v })} />
+            <Toggle label="Number labels" on={opt.labels} onChange={(v) => set({ labels: v })} />
+            <Toggle label="Reference and focus boxes" on={opt.boxes} onChange={(v) => set({ boxes: v })} />
+            <Toggle label="GPS stations" on={opt.stations} onChange={(v) => set({ stations: v })} />
+            <h3>Numbers and playback</h3>
+            <Pick label="Units" value={opt.inches ? "in" : "cm"} onChange={(v) => set({ inches: v === "in" })} items={[["cm", "Centimetres"], ["in", "Inches"]]} />
+            <Pick label="Playback speed" value={opt.speed} onChange={(v) => set({ speed: v })} items={[["slow", "Slow"], ["normal", "Normal"], ["fast", "Fast"]]} />
+            <button className="ghost" style={{ marginTop: 12 }} onClick={() => set({ ...DEFAULTS })}>Reset to defaults</button>
+          </div>
+        )}
         {step && (
           <div className="tour" role="region" aria-label="Guided tour">
             <div className="tourtop">
@@ -614,7 +687,7 @@ export default function Page() {
             <button className="finding hide-on-tour" onClick={() => setPick({ i: hot.i, j: hot.j, lon: hot.lon, lat: hot.lat })}>
               <span>{isImpact
                 ? <><b>{Math.round(100 * hot.share)}%</b> of the focus area lost more than 30% of its usual radar signal across the storm. Strongest spot: <b>{Math.round(100 * hot.v)}%</b>.</>
-                : <>Biggest change in the focus area: <b>{`${hot.v > 0 ? "+" : "−"}${Math.abs(hot.v).toFixed(1)} cm`}</b>{ends ? ` ${hot.v >= 0 ? ends[1] : ends[0]}` : ""} since {fmtDate(layer.dates[0])}.</>}
+                : <>Biggest change in the focus area: <b>{`${hot.v > 0 ? "+" : "−"}${Math.abs(hot.v * uf).toFixed(1)} ${un}`}</b>{ends ? ` ${hot.v >= 0 ? ends[1] : ends[0]}` : ""} since {fmtDate(layer.dates[0])}.</>}
                 <small> Tap to see that spot.</small></span>
             </button>
           )}
@@ -626,12 +699,12 @@ export default function Page() {
           )}
           <div className="card" id="pickcard" ref={cardRef}>
             <h2>{pick ? (pick.station ? `Ground check at station ${pick.station}` : `Spot at ${pick.lat.toFixed(4)}, ${pick.lon.toFixed(4)}`) : "Pick a spot"}</h2>
-            <p className="muted" style={{ margin: "0 0 8px" }}>{layer.static ? (pick ? "Radar signal quality for each pair of passes (1 = surface unchanged, 0 = changed completely)." : "Tap the map to see how the radar signal held up at that spot.") : pick ? `${kindName} ${speed ? "speed, cm per month" : "motion, cm"}` : "Tap the map, or a labelled GPS station, to see how that spot moved."}</p>
+            <p className="muted" style={{ margin: "0 0 8px" }}>{layer.static ? (pick ? "Radar signal quality for each pair of passes (1 = surface unchanged, 0 = changed completely)." : "Tap the map to see how the radar signal held up at that spot.") : pick ? `${kindName} ${speed ? `speed, ${un} per month` : `motion, ${un}`}` : "Tap the map, or a labelled GPS station, to see how that spot moved."}</p>
             {isImpact && pickVal !== null && <div className="hero" key={`${pick.i}-${pick.j}`}>{pickVal === layer.nodata ? "No reading" : `${Math.round((100 * pickVal) / layer.max)}%`}<small> {pickVal === layer.nodata ? "here (water, or never a stable signal)" : "of the usual signal lost across the storm"}</small></div>}
             {sigChart && <Chart key={`s${pick.i}-${pick.j}`} lines={sigChart.lines} markX={null} eventX={eventX} eventLabel={meta.event?.name} domain={[0, 1]} unit="" />}
             {cur && cur.y !== null && <div className="hero" key={`${pick.i}-${pick.j}-${mode}`}>{fmtCm(shown ?? cur.y)}<small> {ends ? (cur.y >= 0 ? ends[1] : ends[0]) : ""} {speed ? "around" : "by"} {fmtDate(layer.dates[t])}</small></div>}
-            {chart && <Chart key={`m${pick.i}-${pick.j}-${layerKey}-${mode}`} lines={chart.lines} markX={toDay(layer.dates[t])} eventX={eventX} eventLabel={meta.event?.name} />}
-            {chart?.stat && <p className="muted" style={{ margin: "8px 0 0" }}>Radar minus GPS, root-mean-square: <b style={{ color: "var(--ink)" }}>{chart.stat.rms.toFixed(2)} cm</b> over {chart.stat.n} dates{ctx.gnss.ref ? ` (GPS relative to station ${ctx.gnss.ref})` : " (GPS not referenced; compare vertical only)"}.</p>}
+            {chart && <Chart key={`m${pick.i}-${pick.j}-${layerKey}-${mode}`} k={uf} lines={chart.lines} markX={toDay(layer.dates[t])} eventX={eventX} eventLabel={meta.event?.name} />}
+            {chart?.stat && <p className="muted" style={{ margin: "8px 0 0" }}>Radar minus GPS, root-mean-square: <b style={{ color: "var(--ink)" }}>{(chart.stat.rms * uf).toFixed(2)} {un}</b> over {chart.stat.n} dates{ctx.gnss.ref ? ` (GPS relative to station ${ctx.gnss.ref})` : " (GPS not referenced; compare vertical only)"}.</p>}
           </div>
           {sliceOk && (
             <div className="card" id="slice">
@@ -642,7 +715,7 @@ export default function Page() {
                 <button className={sliceDir === "we" ? "on" : ""} aria-pressed={sliceDir === "we"} onClick={() => setSliceDir("we")}>West to east</button>
               </div>
               {!slice ? <p className="muted">Loading terrain…</p> : slice.error ? <p className="muted">Terrain heights could not be loaded.</p>
-                : <SliceChart slice={slice} color={layer.static ? (v) => `rgb(${ramp(RAMP.impact, v)})` : (v) => colorCss(v / lim)} unit={layer.static ? "" : unit} isShare={!!layer.static} />}
+                : <SliceChart slice={slice} color={layer.static ? (v) => `rgb(${ramp(RAMP.impact, v)})` : (v) => colorCss(v / lim)} unit={layer.static ? "" : unit} k={layer.static ? 1 : uf} isShare={!!layer.static} />}
             </div>
           )}
           {rain && rain.pts.length > 0 && (
@@ -687,8 +760,8 @@ export default function Page() {
           )}
           {cov && !meta.event && (
             <div className="card" id="coverage">
-              <h2>How much of the focus area each radar could measure</h2>
-              <p className="muted" style={{ margin: "0 0 10px" }}>Share of pixels in the yellow box with a reading on every date.</p>
+              <h2>How often each radar got a reading in the focus area</h2>
+              <p className="muted" style={{ margin: "0 0 10px" }}>Average share of passes with a usable measurement inside the yellow box{cov.window ? `, ${fmtDate(cov.window[0])} to ${fmtDate(cov.window[1])} (the weeks both radars cover)` : ""}.</p>
               <div className="tiles">
                 {SENS.map(([k, name, band]) => (
                   <div key={k} className="tile"><span className="swatch" style={{ background: C[k] }} /><span className="muted">{name} ({band})</span>
@@ -714,6 +787,14 @@ export default function Page() {
   );
 }
 
+function Pick({ label, value, onChange, items }) {
+  return (<div className="srow"><span className="slabel">{label}</span>
+    <div className="seg mini">{items.map(([k, name]) => <button key={k} className={value === k ? "on" : ""} aria-pressed={value === k} onClick={() => onChange(k)}>{name}</button>)}</div></div>);
+}
+function Toggle({ label, hint, on, onChange }) {
+  return (<label className="srow toggle"><span className="slabel">{label}{hint && <small>{hint}</small>}</span>
+    <input type="checkbox" role="switch" checked={on} onChange={(e) => onChange(e.target.checked)} /></label>);
+}
 const cur0 = (chart, layer, t) => { const p = chart && layer && !layer.static ? chart.lines[0].pts.find((q) => q.d === layer.dates[t]) : null; return p && p.y !== null ? p.y : null; };
 function useCount(target) {          // ease the headline number toward its new value
   const [v, setV] = useState(target); const from = useRef(target);
@@ -739,7 +820,7 @@ async function elevations(pts, z = 12) {
   return loc.map(([tx, ty, px, py]) => { const d = tileCache[`${tx}/${ty}`], o = (py * 256 + px) * 4; return d[o] * 256 + d[o + 1] + d[o + 2] / 256 - 32768; });
 }
 
-function SliceChart({ slice, color, unit, isShare }) {
+function SliceChart({ slice, color, unit, isShare, k = 1 }) {
   const [hx, setHx] = useHover();
   const { rows, at, ends } = slice, W = 330, H = 190, m = { l: 40, r: 10, t: 22, b: 26 };
   const x1 = rows[rows.length - 1].km, hs = rows.map((r) => r.h);
@@ -750,7 +831,7 @@ function SliceChart({ slice, color, unit, isShare }) {
   const h = hx !== null ? rows.reduce((a, r) => (Math.abs(r.km - hx) < Math.abs(a.km - hx) ? r : a)) : null;
   const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); setHx(Math.max(0, Math.min(x1, ((((e.clientX - r.left) / r.width) * W - m.l) / (W - m.l - m.r)) * x1))); };
   const exag = ((hi - base) / (H - m.t - m.b)) > 0 ? ((x1 * 1000) / (W - m.l - m.r)) / ((hi - base) / (H - m.t - m.b)) : 1;
-  const fmtV = (v) => (v === null ? "no reading" : isShare ? `${Math.round(v * 100)}% changed` : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)} ${unit}`);
+  const fmtV = (v) => (v === null ? "no reading" : isShare ? `${Math.round(v * 100)}% changed` : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v * k).toFixed(1)} ${unit}`);
   return (
     <div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Terrain slice" onPointerDown={onMove} onPointerMove={onMove} onPointerLeave={() => setHx(null)} style={{ touchAction: "pan-y" }}>
@@ -773,7 +854,7 @@ function SliceChart({ slice, color, unit, isShare }) {
 
 function useHover() { const [h, setH] = useState(null); return [h, setH]; }
 
-function Chart({ lines, markX, eventX = null, eventLabel = "", domain = null, unit = "" }) {
+function Chart({ lines, markX, eventX = null, eventLabel = "", domain = null, unit = "", k = 1 }) {
   const [hx, setHx] = useHover();
   const W = 330, H = 200, m = { l: 40, r: 10, t: 24, b: 24 };
   const all = lines.flatMap((l) => l.pts.filter((p) => p.y !== null));
@@ -792,13 +873,13 @@ function Chart({ lines, markX, eventX = null, eventLabel = "", domain = null, un
     <div>
       {lines.length > 1 && <div className="legend">{lines.map((l) => <span key={l.id}><i style={{ background: C[l.id] }} />{NAME[l.id]}</span>)}</div>}
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Displacement time series" onPointerDown={onMove} onPointerMove={onMove} onPointerLeave={() => setHx(null)} style={{ touchAction: "pan-y" }}>
-        {ticks.map((v) => (<g key={v}><line x1={m.l} x2={W - m.r} y1={sy(v)} y2={sy(v)} stroke="#383835" strokeWidth={v === 0 ? 1.5 : 1} /><text x={m.l - 6} y={sy(v) + 4} textAnchor="end">{v.toFixed(1)}</text></g>))}
+        {ticks.map((v) => (<g key={v}><line x1={m.l} x2={W - m.r} y1={sy(v)} y2={sy(v)} stroke="#383835" strokeWidth={v === 0 ? 1.5 : 1} /><text x={m.l - 6} y={sy(v) + 4} textAnchor="end">{(v * k).toFixed(1)}</text></g>))}
         <text x={m.l} y={H - 6}>{dayStr(x0)}</text><text x={W - m.r} y={H - 6} textAnchor="end">{dayStr(x1)}</text>
         {markX !== null && markX >= x0 && markX <= x1 && <line x1={sx(markX)} x2={sx(markX)} y1={m.t} y2={H - m.b} stroke="#8a8985" strokeDasharray="3 3" />}
         {eventX !== null && eventX >= x0 && eventX <= x1 && <g><line x1={sx(eventX)} x2={sx(eventX)} y1={m.t} y2={H - m.b} stroke="#eda100" strokeWidth="1.5" /><text x={sx(eventX) + (sx(eventX) > W * 0.6 ? -5 : 5)} y={H - m.b - 5} textAnchor={sx(eventX) > W * 0.6 ? "end" : "start"} style={{ fill: "#eda100" }}>{eventLabel}</text></g>}
         {lines.map((l) => { const v = l.pts.filter((p) => p.y !== null); return <path key={l.id} className="draw" pathLength="1" d={v.map((p, k) => `${k ? "L" : "M"}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join("")} fill="none" stroke={C[l.id]} strokeWidth={l.thin ? 1.25 : 2} strokeLinejoin="round" />; })}
         {tips.map(([l, p]) => <circle key={l.id} cx={sx(p.x)} cy={sy(p.y)} r="4.5" fill={C[l.id]} stroke="#242423" strokeWidth="2" />)}
-        {tips.length > 0 && <text x={m.l} y={12} style={{ fill: "#f0efec", fontSize: 11 }}>{tips.map(([l, p]) => `${lines.length > 1 ? NAME[l.id].split(" ")[0] + " " : ""}${p.d ? fmtDate(p.d) : dayStr(p.x)}: ${p.y.toFixed(2)}`).join("   ")}</text>}
+        {tips.length > 0 && <text x={m.l} y={12} style={{ fill: "#f0efec", fontSize: 11 }}>{tips.map(([l, p]) => `${lines.length > 1 ? NAME[l.id].split(" ")[0] + " " : ""}${p.d ? fmtDate(p.d) : dayStr(p.x)}: ${(p.y * k).toFixed(2)}`).join("   ")}</text>}
       </svg>
     </div>
   );

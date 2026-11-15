@@ -47,6 +47,11 @@ that folder are real. Replace the folder contents with pipeline output.
 - First real run (2026-11-14, Central Valley, 3 pairs): 18.6 s per cropped pair; scene-wide tilts of several cm per pair,
   which is why ionosphere correction (`APPLY_IONO = "auto"`) and per-pair plane removal (`deramp`) were added.
 - The mask layer in real files carries higher bits than opera-utils documents; only its low byte is used.
+- First full Portuguese Bend run (2026-11-14, 25 ascending + 24 descending pairs, 26 s per cropped pair):
+  the DESCENDING track shows a compact patch of more than 25 cm of line-of-sight change at the slide
+  (`pipeline/first_real_run_portuguese_bend_desc.png`). The ASCENDING track came out empty because frame 18
+  does not reach the reference box; the config now uses frame 19 and referencing falls back instead of blanking a pair.
+  Vertical / east-west results therefore still need one more run.
 - Meaning of the `mask` layer digits (`USE_MASK` is off).
 - Both reference boxes are first guesses.
 - Streaming speed from Colab.

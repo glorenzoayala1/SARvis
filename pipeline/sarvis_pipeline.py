@@ -66,8 +66,8 @@ SITES = {
         "focus_box": (-118.385, 33.733, -118.350, 33.752),   # CHECK: rough box around the active slide
         "gnss_ref": "PVHS",                                  # GPS station inside ref_box; other stations are differenced against it
         "deramp": True,                                      # remove a tilted plane per pair, fitted outside focus_box
-        "tracks": [  # (track, direction, frame) all confirmed present in CMR on 2026-11-14
-            {"id": "asc", "track": 34, "dir": "A", "frame": 18},
+        "tracks": [  # frames checked against CMR footprints: all pairs of these two cover the whole box.
+            {"id": "asc", "track": 34, "dir": "A", "frame": 19},   # frame 18 stops short of the reference box (found in the first full run)
             {"id": "desc", "track": 13, "dir": "D", "frame": 72},
         ],
         "site_height_m": 60.0,
@@ -163,6 +163,28 @@ else:
     urls = [l for r in res for l in r.data_links(access="external") if l.endswith(".h5")]
     fs = earthaccess.get_fsspec_https_session()
     open_file = lambda u: h5py.File(fs.open(u, **FSSPEC), "r")
+    # Does each frame's footprint contain the whole site box? A frame that stops short leaves the reference box empty.
+    def covers(r):
+        try:
+            pts = [(q["Latitude"], q["Longitude"]) for q in r["umm"]["SpatialExtent"]["HorizontalSpatialDomain"]["Geometry"]["GPolygons"][0]["Boundary"]["Points"]]
+        except Exception:
+            return None
+        def inside(lat, lon):
+            c = False
+            for (y1, x1), (y2, x2) in zip(pts, pts[1:] + pts[:1]):
+                if (y1 > lat) != (y2 > lat) and lon < (x2 - x1) * (lat - y1) / (y2 - y1) + x1: c = not c
+            return c
+        return all(inside(la, lo) for la, lo in ((cfg["bbox"][1], cfg["bbox"][0]), (cfg["bbox"][1], cfg["bbox"][2]), (cfg["bbox"][3], cfg["bbox"][0]), (cfg["bbox"][3], cfg["bbox"][2])))
+    foot = {}
+    for r in res:
+        name = Path(r.data_links(access="external")[0]).name; p = parse_name(name); k = (p["track"], p["dir"], p["frame"])
+        c = covers(r)
+        if c is not None: foot.setdefault(k, []).append(c)
+    for tr in cfg["tracks"]:
+        v = foot.get((tr["track"], tr["dir"], tr["frame"]), [])
+        if v and sum(v) < len(v):
+            alt = [f"frame {k[2]}" for k, vv in foot.items() if k[:2] == (tr["track"], tr["dir"]) and all(vv)]
+            print(f"WARNING {tr['id']}: frame {tr['frame']} covers the whole box in only {sum(v)} of {len(v)} pairs.", "Use", ", ".join(alt) if alt else "a smaller box", "instead.")
 
 pairs = {tr["id"]: [p for p in pick(urls, tr) if p[0] >= cfg.get("start", "0") and p[1] <= cfg.get("end", "9")][:MAX_PAIRS]
          for tr in cfg["tracks"]}
@@ -312,15 +334,17 @@ for tr in cfg["tracks"]:
     have_ion = all(i is not None and np.isfinite(i).any() for i in ion)
     t_raw = tilt(raw); t_ion = tilt([r - i for r, i in zip(raw, ion)]) if have_ion else np.nan
     use_ion = have_ion and (APPLY_IONO is True or (APPLY_IONO == "auto" and t_ion < t_raw))
-    disp = []
+    disp = []; ref_fallbacks = 0
     for r, i, b in zip(raw, ion, bad):
         d = (r - i) if use_ion else r.copy()
         d[b | ~np.isfinite(d)] = np.nan
         if cfg.get("deramp"):
             d = d - plane(d, ~FOCUS)[0]
-        ref = np.nanmedian(d[REF]) if np.isfinite(d[REF]).any() else np.nan
+        if np.isfinite(d[REF]).sum() >= 10: ref = np.nanmedian(d[REF])
+        else: ref = np.nanmedian(d[~FOCUS]) if np.isfinite(d[~FOCUS]).any() else 0.0; ref_fallbacks += 1     # never blank a whole pair
         disp.append(d - ref)
     disp = np.array(disp); coh = np.array(coh)
+    if ref_fallbacks: print(f"   NOTE: the reference box had no usable pixels in {ref_fallbacks} of {len(disp)} pairs; those pairs were referenced to everything outside the focus box.")
     dates = [plist[0][0]] + [b for _, b, _ in plist]
     # Chain the pairs. A pixel missing in a few pairs is filled at its own average rate; too many gaps drops it.
     days = np.array([day(b) - day(a) for a, b, _ in plist], "f4")[:, None, None]
@@ -386,8 +410,10 @@ if {"asc", "desc"} <= set(stacks):
     layers["up"] = {"dates": cd, "data": up, "sensor": "nisar", "kind": "up", "label": "NISAR vertical (+ up)"}
     layers["east"] = {"dates": cd, "data": east, "sensor": "nisar", "kind": "east", "label": "NISAR east-west (+ east)"}
     print("decomposition determinant %.2f (near 0 would mean the two views are too similar)" % det)
-context = {"coverage": {"focus_box": list(cfg["focus_box"]),
-                        "nisar": {k: round(float(np.isfinite(v["pairs"]).all(axis=0)[FOCUS].mean()), 3) for k, v in stacks.items()}, "s1": {}}}
+# Coverage = how often a focus-box pixel had a usable reading, averaged over pixels and passes.
+def share(valid_stack): return round(float(valid_stack[:, FOCUS].mean()), 3) if len(valid_stack) else None
+context = {"coverage": {"focus_box": list(cfg["focus_box"]), "window": None,
+                        "nisar": {k: share(np.isfinite(v["pairs"])) for k, v in stacks.items()}, "s1": {}}}
 all_dates = sorted({d for L in layers.values() for d in L["dates"]})
 D0, D1 = all_dates[0], all_dates[-1]
 
@@ -532,7 +558,7 @@ if RUN_S1:
             prev = layer; cum[i] = layer + offset
         cum = cum - cum[0]
         los = [u for u in los_urls if f"_F{fr}_" in u]
-        s1[pas] = {"dates": [k[1] for k, _ in items], "cum": cum, "frame": fr,
+        s1[pas] = {"dates": [k[1] for k, _ in items], "cum": cum, "raw": raw, "frame": fr,
                    "enu": read_los_tif(open_tif(los[0])) if los else None}
         layers[f"s1_{pas}_los"] = {"dates": s1[pas]["dates"], "data": cum, "sensor": "s1", "kind": pas + "_los",
                                    "label": f"Sentinel-1 {'ascending' if pas == 'asc' else 'descending'} line of sight (+ toward satellite)"}
@@ -542,9 +568,12 @@ if RUN_S1:
         layers["s1_up"] = {"dates": cd, "data": up, "sensor": "s1", "kind": "up", "label": "Sentinel-1 vertical (+ up)"}
         layers["s1_east"] = {"dates": cd, "data": east, "sensor": "s1", "kind": "east", "label": "Sentinel-1 east-west (+ east)"}
     # Coverage: share of focus-box pixels that keep a measurement on every date.
-    cov = lambda cum: round(float(np.isfinite(cum).all(axis=0)[FOCUS].mean()), 3)
-    context["coverage"]["s1"] = {k: cov(v["cum"]) for k, v in s1.items()}
-    print("share of focus-box pixels measured on every date:", context["coverage"])
+    if s1:      # compare the two sensors over the same weeks only
+        w0 = max(min(v["dates"][0] for v in s1.values()), D0); w1 = min(max(v["dates"][-1] for v in s1.values()), D1)
+        context["coverage"]["window"] = [w0, w1]
+        context["coverage"]["s1"] = {k: share(np.isfinite(v["raw"])[[w0 <= d <= w1 for d in v["dates"]]]) for k, v in s1.items()}
+        context["coverage"]["nisar"] = {k: share(np.isfinite(v["pairs"])[[a >= w0 and b <= w1 for a, b, _ in v["plist"]]]) for k, v in stacks.items()}
+    print("average share of passes with a usable reading in the focus box:", context["coverage"])
 
 # %%
 # 10b. Storm impact (only for sites with an "event"). Radar coherence ("signal quality") drops wherever the
@@ -601,7 +630,8 @@ for key, L in layers.items():
                            "sensor": L["sensor"], "kind": L["kind"],
                            "p98": round(float(np.percentile(fin, 98)), 2) if fin.size else 1.0})
 for k, s in stacks.items():   # mean coherence: low = decorrelated (moving too fast, vegetation, water)
-    (np.clip(np.nanmean(s["coh"], axis=0), 0, 1) * 255).astype("u1").tofile(OUT / f"{k}_coh.u8")
+    okc = np.isfinite(s["coh"]); mean_coh = np.where(okc, s["coh"], 0).sum(axis=0) / np.maximum(okc.sum(axis=0), 1)
+    (np.clip(mean_coh, 0, 1) * 255).astype("u1").tofile(OUT / f"{k}_coh.u8")
     meta["layers"].append({"key": k + "_coh", "label": f"NISAR {k} mean coherence (0-1)", "file": f"{k}_coh.u8",
                            "static": True, "sensor": "nisar", "kind": "coh"})
 for key, L in static_layers.items():      # 0-250 = value 0-1, 255 = no data

@@ -185,3 +185,18 @@ button.finding { grid-template-columns: 1fr; }
 .vlabel { pointer-events: none; font: 600 11.5px system-ui, sans-serif; color: rgba(255,255,255,0.92); letter-spacing: 0.01em; font-variant-numeric: tabular-nums;
   text-shadow: 0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.7), 0 1px 1px rgba(0,0,0,0.9); white-space: nowrap; }
 .vlabel.peak { font-size: 13px; font-weight: 700; color: #fff; }
+
+/* settings and 2D/3D */
+.basesw .sep { width: 1px; background: var(--line); margin: 4px 3px; }
+.basesw button:disabled { opacity: 0.35; cursor: default; }
+.settings h3 { margin: 16px 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+.settings .shead { display: flex; justify-content: space-between; align-items: center; }
+.settings .shead h2 { font-size: 15px; margin: 0; }
+button.ghost.small { min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
+.settings select { width: 100%; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 9px; font: inherit; margin-bottom: 4px; }
+.srow { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 42px; margin: 0; color: var(--ink-2); font-size: 13px; }
+.srow .slabel { display: grid; } .srow .slabel small { color: var(--ink-3); font-size: 11.5px; }
+.seg.mini { grid-auto-columns: auto; padding: 3px; border-radius: 8px; } .seg.mini button { min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
+.srow.toggle input { appearance: none; -webkit-appearance: none; width: 40px; height: 24px; border-radius: 12px; background: var(--surface-3); border: 1px solid var(--line); position: relative; cursor: pointer; transition: background 0.2s ease; flex: none; }
+.srow.toggle input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--ink-2); transition: transform 0.2s ease, background 0.2s ease; }
+.srow.toggle input:checked { background: var(--accent); border-color: var(--accent); } .srow.toggle input:checked::after { transform: translateX(16px); background: #1a1a19; }

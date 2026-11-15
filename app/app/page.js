@@ -504,6 +504,7 @@ export default function Page() {
   // 3D view: the real terrain (stretched a little so slopes read), the radar colours draped over it, and a thin
   // column on each block of pixels. Column height is proportional to the measured change at one stated scale.
   const TERRAIN_X = 1.5;
+const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wind speed, so the movement is visible
   const mPerCm = useMemo(() => {
     if (!meta || !layer || layer.static) return 0;
     const widthM = (meta.bbox[2] - meta.bbox[0]) * 111320 * Math.cos((((meta.bbox[1] + meta.bbox[3]) / 2) * Math.PI) / 180);
@@ -561,32 +562,85 @@ export default function Page() {
     const d = layer.static ? (meta?.event ? null : null) : layer.dates[t], k = d ? ctx.cloud.dates.indexOf(d) : -1;
     return k >= 0 ? ctx.cloud.pct[k] : null;
   }, [ctx, layerKey, t, meta]);
+  // Cloud pictures were generated with fal.ai (public/clouds.webp holds two). Each cloud is one picture that always
+  // faces the camera. How many: NASA's daily cloud cover. Which way they drift: NASA's daily wind direction, sped up.
+  const cloudData = useRef({ list: [], ext: null, vx: 0, vy: 0, t0: 0, still: true });
   useEffect(() => {
     const m = map.current; if (!m || !ready) return;
-    const fc = { type: "FeatureCollection", features: [] };
+    const list = []; let ext = null, vx = 0, vy = 0;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (opt.view3d && opt.clouds && meta && cloudPct !== null) {
       const [w, s, e, n] = meta.bbox, lat0 = (s + n) / 2, mLon = 111320 * Math.cos((lat0 * Math.PI) / 180), mLat = 110540, widthM = (e - w) * mLon;
-      let seed = [...(layer.dates?.[t] || "0")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7); const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
-      const count = Math.round((cloudPct / 100) * 30);
+      const padX = (e - w) * 0.15, padY = (n - s) * 0.15; ext = [w - padX, s - padY, e + padX, n + padY];
+      const day = layer.dates?.[t] || "0";
+      let seed = [...day].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7); const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+      const count = Math.round((cloudPct / 100) * 44);
       for (let c = 0; c < count; c++) {
-        const cx = w + (rnd() * 1.3 - 0.15) * (e - w), cy = s + (rnd() * 1.3 - 0.15) * (n - s), base = (260 + rnd() * 340) * TERRAIN_X, thick = (90 + rnd() * 110) * TERRAIN_X;
-        const puffs = 4 + Math.floor(rnd() * 4), size = widthM * (0.014 + rnd() * 0.018);
-        for (let q = 0; q < puffs; q++) {
-          const px = cx + ((rnd() - 0.5) * size * 2.2) / mLon, py = cy + ((rnd() - 0.5) * size * 1.0) / mLat, r = size * (0.5 + rnd() * 0.6), ring = [];
-          // three stacked tiers, each narrower, so a puff reads as a rounded mound instead of a flat disc
-          const b0 = base + rnd() * 40, th0 = thick * (0.7 + rnd() * 0.6);
-          [[1, 0, 0.4], [0.74, 0.4, 0.75], [0.42, 0.75, 1]].forEach(([k, lo, hi]) => {
-            const tier = [];
-            for (let a = 0; a <= 18; a++) { const th = (a / 18) * 2 * Math.PI; tier.push([px + (Math.cos(th) * r * k) / mLon, py + (Math.sin(th) * r * k * 0.8) / mLat]); }
-            fc.features.push({ type: "Feature", properties: { b: b0 + th0 * lo, h: b0 + th0 * hi }, geometry: { type: "Polygon", coordinates: [tier] } });
-          });
-        }
+        const hw = widthM * (0.022 + rnd() * 0.026), base = (180 + rnd() * 240) * TERRAIN_X;       // half-width in metres; base height above sea level
+        list.push({ lon: ext[0] + rnd() * (ext[2] - ext[0]), lat: ext[1] + rnd() * (ext[3] - ext[1]), hw, alt: base + hw * 0.5, pic: rnd() < 0.5 ? 0 : 1, flip: rnd() < 0.5, a: 0.72 + rnd() * 0.2 });
       }
+      const k = ctx?.wind ? ctx.wind.dates.indexOf(day) : -1;
+      if (k >= 0 && !calm) { const to = ((ctx.wind.dir[k] + 180) * Math.PI) / 180, sp = Math.max(1, ctx.wind.speed[k]) * CLOUD_SPEEDUP;   // "dir" is where the wind comes from
+        vx = (Math.sin(to) * sp) / mLon; vy = (Math.cos(to) * sp) / mLat; }                                 // degrees per second
     }
-    if (m.getSource("clouds")) m.getSource("clouds").setData(fc);
-    else { m.addSource("clouds", { type: "geojson", data: fc });
-      m.addLayer({ id: "clouds", type: "fill-extrusion", source: "clouds", paint: { "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": "#f6f7f9", "fill-extrusion-opacity": 0.42, "fill-extrusion-vertical-gradient": true } }, top.current); }
-  }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t]);
+    cloudData.current = { list, ext, vx, vy, t0: performance.now(), still: !vx && !vy };
+    if (typeof window !== "undefined") window.__sarvisClouds = list.length;
+    if (!m.getLayer("clouds")) m.addLayer({ id: "clouds", type: "custom", renderingMode: "2d",
+      onAdd(_, gl) {
+        const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return o; };
+        const pr = gl.createProgram();
+        gl.attachShader(pr, sh(gl.VERTEX_SHADER, `attribute vec3 a_pos; attribute vec2 a_corner; attribute float a_hw; attribute vec2 a_uv; attribute float a_alpha;
+          uniform mat4 u_m; uniform vec2 u_vp; varying vec2 v_uv; varying float v_alpha;
+          float px(vec4 p, vec3 off) { vec4 q = u_m * vec4(a_pos + off, 1.0); return length((q.xy / q.w - p.xy / p.w) * u_vp * 0.5); }
+          void main() { vec4 p = u_m * vec4(a_pos, 1.0);
+            float hx = max(px(p, vec3(a_hw, 0.0, 0.0)), max(px(p, vec3(0.0, a_hw, 0.0)), px(p, vec3(0.0, 0.0, a_hw))));      // half-width on screen, in pixels
+            v_alpha = a_alpha * clamp(1.7 - hx / (0.45 * u_vp.x), 0.0, 1.0);                         // fade a cloud out as the camera passes through it
+            v_uv = a_uv;
+            gl_Position = p.w > 0.0 ? p + vec4(a_corner * vec2(hx, hx * 0.5) * 2.0 / u_vp * p.w, 0.0, 0.0) : vec4(2.0, 2.0, 2.0, 1.0); }`));
+        gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision mediump float; uniform sampler2D u_tex; varying vec2 v_uv; varying float v_alpha;
+          void main() { gl_FragColor = texture2D(u_tex, v_uv) * v_alpha; }`));
+        gl.linkProgram(pr);
+        this.pr = pr; this.buf = gl.createBuffer(); this.vao = gl.createVertexArray ? gl.createVertexArray() : null;   // our own vertex state, so the map's layers are left untouched
+        this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), corner: gl.getAttribLocation(pr, "a_corner"), hw: gl.getAttribLocation(pr, "a_hw"), uv: gl.getAttribLocation(pr, "a_uv"), al: gl.getAttribLocation(pr, "a_alpha"),
+          m: gl.getUniformLocation(pr, "u_m"), vp: gl.getUniformLocation(pr, "u_vp"), tex: gl.getUniformLocation(pr, "u_tex") };
+        this.img = new Image(); this.img.onload = () => { this.imgReady = true; map.current?.triggerRepaint(); }; this.img.src = "clouds.webp";
+      },
+      render(gl, mx) {
+        const d = cloudData.current, L = this.loc; if (!d.list.length || !this.imgReady) return;
+        if (!this.tex) { this.tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, this.tex);
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.img); gl.generateMipmap(gl.TEXTURE_2D);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); }
+        // where every cloud is right now: drifted with the wind, wrapped around the edges of the area, faded near those edges
+        const [x0, y0, x1, y1] = d.ext, W = x1 - x0, H = y1 - y0, sec = (performance.now() - d.t0) / 1000, wrap = (v, lo, span) => lo + ((((v - lo) % span) + span) % span);
+        const arr = new Float32Array(d.list.length * 6 * 9); let o = 0;
+        const order = d.list.map((c) => { const lon = wrap(c.lon + d.vx * sec, x0, W), lat = wrap(c.lat + d.vy * sec, y0, H), mc = maplibregl.MercatorCoordinate.fromLngLat([lon, lat], c.alt);
+          const fx = Math.min(lon - x0, x1 - lon) / W, fy = Math.min(lat - y0, y1 - lat) / H, edge = Math.min(1, Math.min(fx, fy) / 0.07);
+          return { c, mc, edge, depth: mx[3] * mc.x + mx[7] * mc.y + mx[11] * mc.z + mx[15] }; }).sort((p, q) => q.depth - p.depth);       // far ones first
+        for (const { c, mc, edge } of order) {
+          const hw = c.hw * mc.meterInMercatorCoordinateUnits(), v0 = c.pic * 0.5, u0 = c.flip ? 1 : 0, u1 = c.flip ? 0 : 1;
+          for (const [cx, cy] of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) {
+            arr[o++] = mc.x; arr[o++] = mc.y; arr[o++] = mc.z; arr[o++] = cx; arr[o++] = cy; arr[o++] = hw;
+            arr[o++] = cx < 0 ? u0 : u1; arr[o++] = v0 + (cy > 0 ? 0 : 0.5); arr[o++] = c.a * edge;
+          }
+        }
+        gl.useProgram(this.pr); if (this.vao) gl.bindVertexArray(this.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+        [[L.pos, 3, 0], [L.corner, 2, 12], [L.hw, 1, 20], [L.uv, 2, 24], [L.al, 1, 32]].forEach(([l, sz, off]) => { gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, sz, gl.FLOAT, false, 36, off); });
+        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.vp, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.tex); gl.uniform1i(L.tex, 0);
+        gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.drawArrays(gl.TRIANGLES, 0, d.list.length * 6);
+        if (this.vao) gl.bindVertexArray(null);
+      } });            // added last: anything placed lower is painted over when the terrain is drawn
+    m.triggerRepaint();
+    if (cloudData.current.still || !list.length) return;
+    let raf = 0, skip = false;                                   // keep the map redrawing (about 30 times a second) while clouds are drifting
+    const tick = () => { skip = !skip; if (!skip) m.triggerRepaint(); raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t, ctx]);
   useEffect(() => { if (tour && opt.view3d) set({ view3d: false }); }, [tour]);
 
   // Soft value labels on the map: walk outward from the biggest change in three directions and
@@ -672,7 +726,7 @@ export default function Page() {
             <Toggle label="Reference and focus boxes" on={opt.boxes} onChange={(v) => set({ boxes: v })} />
             <Toggle label="GPS stations" on={opt.stations} onChange={(v) => set({ stations: v })} />
             <h3>3D</h3>
-            <Toggle label="Clouds" hint="Amount follows NASA's daily cloud cover" on={opt.clouds} onChange={(v) => set({ clouds: v })} />
+            <Toggle label="Clouds" hint="Amount and drift direction follow NASA's daily cloud cover and wind; drift is sped up 12 times" on={opt.clouds} onChange={(v) => set({ clouds: v })} />
             <Pick label="Column height" value={opt.tall} onChange={(v) => set({ tall: v })} items={[["low", "Low"], ["medium", "Medium"], ["high", "High"]]} />
             <h3>Numbers and playback</h3>
             <Pick label="Units" value={opt.inches ? "in" : "cm"} onChange={(v) => set({ inches: v === "in" })} items={[["cm", "Centimetres"], ["in", "Inches"]]} />

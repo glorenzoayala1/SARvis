@@ -650,7 +650,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         const pr = gl.createProgram();
         gl.attachShader(pr, sh(gl.VERTEX_SHADER, `attribute vec3 a_pos; attribute vec2 a_km; uniform mat4 u_m; uniform float u_ground; varying vec2 v_km;
           uniform vec3 u_ctr;
-          void main() { float wide = u_ground > 1.5 ? 20.0 : 1.0;      // only the far sky is stretched: stretching the others cost the precision the haze distance needs v_km = a_km * wide;
+          void main() { float wide = u_ground > 1.5 ? 20.0 : 1.0; v_km = a_km * wide;     /* only the far sky is stretched */
             vec3 q = vec3(u_ctr.xy + (a_pos.xy - u_ctr.xy) * wide, u_ground > 1.5 ? a_pos.z * 30.0 : (u_ground > 0.5 ? 0.0 : a_pos.z));
             vec4 p = u_m * vec4(q, 1.0); p.z = (u_ground > 1.5 ? 0.9999 : 0.9995) * p.w;
             gl_Position = p; }`));     // pinned to the far depth: land and columns stay in front
@@ -679,9 +679,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       },
       render(gl, mx) {
         const d = cloudData.current, L = this.loc, mm = map.current; if (!d.on || !mm) return;
-        // a sheet far wider than the view, centred on the site, so it runs past the skyline in every direction
-        const R = 30000, c = maplibregl.MercatorCoordinate.fromLngLat([d.lon0, d.lat0], d.alt), u = c.meterInMercatorCoordinateUnits() * 1000, arr = new Float32Array(30); let o = 0;
-        for (const [x, y] of [[-R, -R], [R, -R], [R, R], [-R, -R], [R, R], [-R, R]]) { arr[o++] = c.x + x * u; arr[o++] = c.y - y * u; arr[o++] = c.z; arr[o++] = x; arr[o++] = y; }
+        const c = maplibregl.MercatorCoordinate.fromLngLat([d.lon0, d.lat0], d.alt), u = c.meterInMercatorCoordinateUnits() * 1000;
         // is the camera under the layer (look along its underside) or over it (look down through it)?
         const tr = mm.transform, ppm = (512 * 2 ** mm.getZoom()) / (40075016.686 * Math.cos((mm.getCenter().lat * Math.PI) / 180));      // screen pixels per metre at the map centre
         const camAlt = (Math.cos((mm.getPitch() * Math.PI) / 180) * tr.cameraToCenterDistance) / ppm + (tr.elevation || 0) * TERRAIN_X;
@@ -689,13 +687,22 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         // where the camera stands, in km east and north of the site centre: haze thickens with distance from there
         const ctr = mm.getCenter(), br = (mm.getBearing() * Math.PI) / 180, back = (Math.sin((mm.getPitch() * Math.PI) / 180) * tr.cameraToCenterDistance) / ppm / 1000;
         const camE = (ctr.lng - d.lon0) * 111.32 * Math.cos((d.lat0 * Math.PI) / 180) - Math.sin(br) * back, camN = (ctr.lat - d.lat0) * 110.54 - Math.cos(br) * back;
+        // The sheets are drawn as rings around the camera, small near it and growing outward to far past the skyline.
+        // (One giant square lost the precision the haze distance and the cloud pattern need close to the camera.)
+        const SEG = 40, radii = [0]; for (let r = 0.3; r < 3e6; r *= 1.6) radii.push(r);
+        const arr = new Float32Array((radii.length - 1) * SEG * 6 * 5); let o = 0;
+        const vert = (r, a) => { const x = camE + r * Math.cos(a), y = camN + r * Math.sin(a); arr[o++] = c.x + x * u; arr[o++] = c.y - y * u; arr[o++] = c.z; arr[o++] = x; arr[o++] = y; };
+        for (let k = 0; k < radii.length - 1; k++) for (let q = 0; q < SEG; q++) { const a0 = (q / SEG) * 2 * Math.PI, a1 = ((q + 1) / SEG) * 2 * Math.PI;
+          vert(radii[k], a0); vert(radii[k + 1], a0); vert(radii[k + 1], a1); vert(radii[k], a0); vert(radii[k + 1], a1); vert(radii[k], a1); }
+        const nVert = o / 5;
         gl.useProgram(this.pr); if (this.vao) gl.bindVertexArray(this.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, 20, 0); gl.enableVertexAttribArray(L.km); gl.vertexAttribPointer(L.km, 2, gl.FLOAT, false, 20, 12);
-        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x, c.y, c.z); gl.uniform1f(L.reach, Math.max(1, tr.cameraToCenterDistance / ppm / 1000));     // haze starts a little past the point the camera looks at, at any zoom
+        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x + camE * u, c.y - camN * u, c.z); gl.uniform1f(L.reach, Math.max(1, tr.cameraToCenterDistance / ppm / 1000));     // haze starts a little past the point the camera looks at, at any zoom
         gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        gl.disable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 1); gl.drawArrays(gl.TRIANGLES, 0, 6);            // haze over the far land, drawn at sea level
-        gl.enable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 2); gl.drawArrays(gl.TRIANGLES, 0, 6);             // open sky; land and columns stay in front
-        gl.uniform1f(L.ground, 0); gl.drawArrays(gl.TRIANGLES, 0, 6);                                       // the cloud layer
+        gl.enable(gl.DEPTH_TEST);                                                                               // land and columns stay in front of everything drawn here
+        gl.uniform1f(L.ground, 1); gl.drawArrays(gl.TRIANGLES, 0, nVert);                                       // haze where the map has no land to show, out to the skyline
+        gl.uniform1f(L.ground, 2); gl.drawArrays(gl.TRIANGLES, 0, nVert);                                       // open sky
+        gl.uniform1f(L.ground, 0); gl.drawArrays(gl.TRIANGLES, 0, nVert);                                       // the cloud layer
         if (this.vao) gl.bindVertexArray(null);
       } });            // added last: anything placed lower is painted over when the terrain is drawn
     m.triggerRepaint();

@@ -5,6 +5,27 @@ import maplibregl from "maplibre-gl";
 // Map colour: blue = positive, red = negative, neutral grey at zero. Coherence uses one hue.
 const POS = [59, 130, 214], NEG = [217, 83, 74], MID = [120, 120, 116];
 // Chart series colours (fixed by entity): NISAR blue, Sentinel-1 orange, GPS light grey.
+// What the real runs showed. Written by hand from the numbers computed on 2026-11-14; update these if a site is re-run.
+const FINDINGS = [
+  { site: "portuguese-bend", place: "Portuguese Bend, California", what: "A coastal landslide",
+    big: "about 1.3 m", bigNote: "the fastest spot sank, 5 Dec 2025 to 13 Oct 2026",
+    points: ["The slide core sank about 52 cm (the middle value of 308 points).",
+      "It moved about 6 cm a month in the wet winter and about 3.5 by autumn.",
+      "NISAR got a usable reading on 72% and 61% of passes over the slide. Sentinel-1 got 46% and 44%."],
+    sure: "Checked against GPS off the slide (2.2 cm apart on average). No ground measurement on the slide itself, so 1.3 m is unconfirmed." },
+  { site: "central-valley", place: "Central Valley, California", what: "Farmland over pumped groundwater",
+    big: "about 33 cm", bigNote: "the deepest spot sank, 30 Nov 2025 to 8 Oct 2026",
+    points: ["A GPS station rose about 3 cm through the wet winter, then sank about 9 cm from late February to October.",
+      "The middle of the study box sank about 9 cm.",
+      "On open farmland the two radars did about equally well: NISAR 90% and 89% of passes, Sentinel-1 82% and 86%."],
+    sure: "The first run disagreed with GPS by up to 15 cm, so the map is pinned to that GPS station. East-west motion is left out here." },
+  { site: "destin", place: "Destin, Florida", what: "Hurricane Isaias, 9 October 2026",
+    big: "0.25 to 0.16", bigNote: "average signal quality, calm passes to the storm pass (other direction: 0.37 to 0.23)",
+    points: ["Both viewing directions lost signal in the pass that spans landfall.",
+      "They disagree on where. Only one shows strong change on the barrier island.",
+      "Only 34% of the area gives a reading at all. The rest is water or ground the radar could not follow."],
+    sure: "This shows the storm passing, not a damage map. Five passes per direction is a thin baseline." },
+];
 const C = { nisar: "#3987e5", s1: "#d95926", gps: "#c3c2b7", asc: "#199e70", desc: "#9085e9" };
 // One colour per radar band, checked for colour-blind separation on the dark panel. L and C keep the colours NISAR and Sentinel-1 use everywhere else.
 const BANDS = [
@@ -521,8 +542,11 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   const mPerCm = useMemo(() => {
     if (!meta || !layer || layer.static) return 0;
     const widthM = (meta.bbox[2] - meta.bbox[0]) * 111320 * Math.cos((((meta.bbox[1] + meta.bbox[3]) / 2) * Math.PI) / 180);
-    return niceStep((0.012 * widthM) / lim) * { low: 0.5, medium: 1, high: 2 }[opt.tall];
-  }, [meta, layerKey, lim, opt.tall]);
+    // the scale comes from the biggest change anywhere on the latest date, so the tallest column is about 3% of the site's width
+    let peak = 0; const last = layer.dates.length - 1;
+    if (grid && grid._key === layer.key) for (let i = 0; i < meta.nx * meta.ny; i++) { const v = valueAt(grid, layer, last, i); if (v !== null && Math.abs(v) > peak) peak = Math.abs(v); }
+    return niceStep((0.03 * widthM) / Math.max(peak, lim)) * { low: 0.5, medium: 1, high: 2 }[opt.tall];
+  }, [meta, layerKey, lim, opt.tall, grid, mode]);
   useEffect(() => {
     const m = map.current; if (!m || !ready) return;
     const on = opt.view3d && bars3d && meta && grid && layer && grid._key === layer.key;
@@ -543,7 +567,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       if (!cnt) continue;
       const v = sum / cnt, k = layer.static ? v : v / lim; if (Math.abs(k) < 0.15) continue;          // leave out near-zero noise
       const cx = w + (i + B / 2) * dx, cy = n - (j + B / 2) * dy, hw = B * dx * 0.06, hh = B * dy * 0.06;   // thin: about an eighth of the block
-      cols.push({ lon: cx, lat: cy, hw, hh, h: layer.static ? Math.min(1, v) * impactTop : Math.abs(v) * mPerCm,
+      cols.push({ lon: cx, lat: cy, hw, hh, h: layer.static ? Math.min(1, v / IMPACT_TOP) * impactTop : Math.abs(v) * mPerCm,
         c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, Math.abs(k) / (layer.static ? IMPACT_TOP : 1)))})` });
     }
     // the map itself lifts each column onto the terrain, so heights here are measured from the ground
@@ -585,13 +609,14 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const m = map.current; if (!m || !ready) return;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let d = { on: false };
-    if (opt.view3d && opt.clouds && meta && cloudPct !== null) {
+    if (opt.view3d && meta) {                        // sky and haze are always drawn in 3D; cloud only when it is switched on and NASA has a figure for the date
+      const showCloud = opt.clouds && cloudPct !== null;
       const [w, s, e, n] = meta.bbox, lon0 = (w + e) / 2, lat0 = (s + n) / 2, day = layer.dates?.[t] || "0";
       const seed = [...day].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
       const k = ctx?.wind ? ctx.wind.dates.indexOf(day) : -1; let vx = 0, vy = 0;
       if (k >= 0 && !calm) { const to = ((ctx.wind.dir[k] + 180) * Math.PI) / 180, sp = (Math.max(1, ctx.wind.speed[k]) * CLOUD_SPEEDUP) / 1000;   // "dir" is where the wind comes from; km per second
         vx = Math.sin(to) * sp; vy = Math.cos(to) * sp; }
-      d = { on: true, lon0, lat0, alt: Math.max(CLOUD_BASE_M * TERRAIN_X, camAlt3d.current * 1.3), cover: cloudPct / 100, ox: (seed % 977) * 1.7, oy: (seed % 619) * 2.3, vx, vy, t0: performance.now() };
+      d = { on: true, lon0, lat0, alt: Math.max(CLOUD_BASE_M * TERRAIN_X, camAlt3d.current * 1.3), cover: showCloud ? cloudPct / 100 : -1, ox: (seed % 977) * 1.7, oy: (seed % 619) * 2.3, vx, vy, t0: performance.now() };
     }
     cloudData.current = d;
     if (typeof window !== "undefined") { window.__sarvisClouds = d.on ? d.cover : null; window.__sarvisCloudD = d; }
@@ -603,15 +628,17 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
           uniform vec3 u_ctr;
           void main() { float wide = u_ground > 0.5 ? 20.0 : 1.0; v_km = a_km * wide;
             vec3 q = vec3(u_ctr.xy + (a_pos.xy - u_ctr.xy) * wide, u_ground > 1.5 ? a_pos.z * 30.0 : (u_ground > 0.5 ? 0.0 : a_pos.z));
-            vec4 p = u_m * vec4(q, 1.0); p.z = (u_ground > 1.5 ? 0.9999 : 0.9995) * p.w; gl_Position = p; }`));     // pinned to the far depth: land and columns stay in front
-        gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision highp float; varying vec2 v_km; uniform vec2 u_off; uniform float u_cover; uniform float u_below; uniform float u_ground; uniform vec2 u_cam;
+            vec4 p = u_m * vec4(q, 1.0); p.z = (u_ground > 1.5 ? 0.9999 : 0.9995) * p.w;
+            gl_Position = u_ground > 2.5 ? vec4(a_km / 3000.0, 0.99995, 1.0) : p; }`));     // pinned to the far depth: land and columns stay in front
+        gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision highp float; varying vec2 v_km; uniform vec2 u_off; uniform float u_cover; uniform float u_below; uniform float u_ground; uniform vec2 u_cam; uniform float u_reach;
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
             return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
           float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.03 + 17.0; a *= 0.5; } return s; }
           void main() { float dist = length(v_km - u_cam); vec3 hz = vec3(0.80, 0.86, 0.92);
+            if (u_ground > 2.5) { gl_FragColor = vec4(hz, 1.0); return; }                                                                 // plain backing over the whole screen, behind everything
             if (u_ground > 1.5) { gl_FragColor = vec4(mix(vec3(0.33, 0.54, 0.86), hz, smoothstep(30.0, 900.0, dist)), 1.0); return; }      // open sky behind everything
-            if (u_ground > 0.5) { float f = smoothstep(9.0, 24.0, dist); gl_FragColor = vec4(hz * f, f); return; }                // distant land fades into haze up to the skyline
+            if (u_ground > 0.5) { float f = smoothstep(2.3 * u_reach, 6.0 * u_reach, dist); gl_FragColor = vec4(hz * f, f); return; }                // distant land fades into haze up to the skyline
             vec2 p = (v_km + u_off) / 2.6;
             float n = 0.72 * fbm(p) + 0.28 * fbm(p * 0.23 + 40.0) / 0.97;                // fine billows on top of broad patches
             float th = 0.70 - 0.44 * u_cover;                                             // more cover -> lower bar -> more of the sheet is cloud
@@ -625,7 +652,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             gl_FragColor = mix(above, vec4(below, 1.0), u_below); }`));
         gl.linkProgram(pr);
         this.pr = pr; this.buf = gl.createBuffer(); this.vao = gl.createVertexArray ? gl.createVertexArray() : null;   // our own vertex state, so the map's layers are left untouched
-        this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), km: gl.getAttribLocation(pr, "a_km"), m: gl.getUniformLocation(pr, "u_m"), off: gl.getUniformLocation(pr, "u_off"), cover: gl.getUniformLocation(pr, "u_cover"), below: gl.getUniformLocation(pr, "u_below"), ground: gl.getUniformLocation(pr, "u_ground"), cam: gl.getUniformLocation(pr, "u_cam"), ctr: gl.getUniformLocation(pr, "u_ctr") };
+        this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), km: gl.getAttribLocation(pr, "a_km"), m: gl.getUniformLocation(pr, "u_m"), off: gl.getUniformLocation(pr, "u_off"), cover: gl.getUniformLocation(pr, "u_cover"), below: gl.getUniformLocation(pr, "u_below"), ground: gl.getUniformLocation(pr, "u_ground"), cam: gl.getUniformLocation(pr, "u_cam"), ctr: gl.getUniformLocation(pr, "u_ctr"), reach: gl.getUniformLocation(pr, "u_reach") };
       },
       render(gl, mx) {
         const d = cloudData.current, L = this.loc, mm = map.current; if (!d.on || !mm) return;
@@ -641,8 +668,9 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         const camE = (ctr.lng - d.lon0) * 111.32 * Math.cos((d.lat0 * Math.PI) / 180) - Math.sin(br) * back, camN = (ctr.lat - d.lat0) * 110.54 - Math.cos(br) * back;
         gl.useProgram(this.pr); if (this.vao) gl.bindVertexArray(this.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, 20, 0); gl.enableVertexAttribArray(L.km); gl.vertexAttribPointer(L.km, 2, gl.FLOAT, false, 20, 12);
-        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x, c.y, c.z);
+        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x, c.y, c.z); gl.uniform1f(L.reach, Math.max(1, tr.cameraToCenterDistance / ppm / 1000));     // haze starts a little past the point the camera looks at, at any zoom
         gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.enable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 3); gl.drawArrays(gl.TRIANGLES, 0, 6);             // haze-coloured backing, so no dark gaps can show through
         gl.disable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 1); gl.drawArrays(gl.TRIANGLES, 0, 6);            // haze over the far land, drawn at sea level
         gl.enable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 2); gl.drawArrays(gl.TRIANGLES, 0, 6);             // open sky; land and columns stay in front
         gl.uniform1f(L.ground, 0); gl.drawArrays(gl.TRIANGLES, 0, 6);                                       // the cloud layer
@@ -705,7 +733,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   const SENS = SENSORS.filter(([k]) => meta?.layers.some((l) => (l.sensor || "nisar") === k));
   const fmtCm = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v * uf).toFixed(1)} ${unit}`;
 
-  const TABS = [["view", "View"], ["spot", "Spot"], ["weather", "Weather"], ["compare", "Compare"], ["about", "About"]].filter(([k]) => k !== "compare" || (meta && !meta.event && (cov || SENS.length > 1)));
+  const TABS = [["found", "Findings"], ["view", "View"], ["spot", "Spot"], ["weather", "Weather"], ["compare", "Compare"], ["about", "About"]].filter(([k]) => k !== "compare" || (meta && !meta.event && (cov || SENS.length > 1)));
   const openTab = (k) => { setTab(k); setSheet((v) => (v === "peek" ? "half" : v)); };
   const grab = useRef(null);
   const onGrabDown = (e) => { const el = sheetEl.current; grab.current = { y: e.clientY, h: el.offsetHeight, moved: false }; e.currentTarget.setPointerCapture(e.pointerId); };
@@ -723,6 +751,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       <div className="topbar">
         <div className="brandchip"><span className="mark" aria-hidden="true" /><b>SARvis</b>{meta && <span className="sitename">{meta.short}</span>}</div>
         <div className="topbtns">
+          {meta && layer && <button className="ghost wide" onClick={() => { setTour(null); setTab("found"); setSheet("full"); }}>What we found</button>}
           {meta && layer && <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Tour</button>}
           <button className="ghost" aria-expanded={showSettings} onClick={() => setShowSettings(true)}>Settings</button>
         </div>
@@ -948,6 +977,23 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             </div>
             <p className="muted" style={{ margin: "10px 0 0" }}>Longer waves pass through plants and follow bigger ground movements. Shorter waves show finer detail but lose track of fast motion sooner. P, X and Ka wavelengths are worked out from each band's frequency range.</p>
           </div>
+          </div>
+        )}
+        {meta && layer && tab === "found" && !step && (
+          <div className="pane" id="found">
+            <p className="muted" style={{ margin: "0 0 12px" }}>Three places, measured from space with NASA's NISAR radar. Every number below comes from real data processed for this project.</p>
+            <div className="found">
+              {FINDINGS.map((f) => (
+                <div key={f.site} className={"card finding" + (f.site === siteId ? " here" : "")}>
+                  <div className="muted">{f.what}</div>
+                  <h2>{f.place}</h2>
+                  <div className="hero">{f.big}</div>
+                  <div className="muted heronote">{f.bigNote}</div>
+                  <ul>{f.points.map((x, k) => <li key={k}>{x}</li>)}</ul>
+                  <p className="sure"><b>How sure:</b> {f.sure}</p>
+                  <button className="ghost" onClick={() => { if (f.site !== siteId) setSiteId(f.site); setSheet("peek"); }}>{f.site === siteId ? "Back to the map" : "Show me"}</button>
+                </div>))}
+            </div>
           </div>
         )}
         {meta && layer && tab === "about" && (

@@ -253,3 +253,21 @@ label.strength { display: grid; gap: 2px; margin: 0; color: var(--ink-2); font-s
 .band .meter { margin: 6px 0 4px; }
 .bandfoot { display: flex; gap: 10px; align-items: baseline; }
 .bandfoot .num { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 92px; }
+
+/* findings */
+.found { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 860px) { .found { grid-template-columns: 1fr; } }
+.finding { display: flex; flex-direction: column; gap: 4px; }
+.finding.here { border-color: var(--accent); }
+.finding h2 { font-size: 15px; margin: 0; }
+.finding .hero { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.finding .heronote { font-size: 12px; }
+.finding ul { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; line-height: 1.45; }
+.finding .sure { font-size: 12px; line-height: 1.45; color: var(--ink-3); margin: 10px 0 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.finding .sure b { color: var(--ink-2, var(--ink)); }
+.finding button { margin-top: auto; align-self: flex-start; }
+@media (max-width: 560px) {
+  .tabs { padding: 0 4px; gap: 0; }
+  .tabs button { padding: 10px 7px; font-size: 12.5px; }      /* six tabs fit a phone without scrolling */
+  .topbtns .wide { display: none; }                            /* the Findings tab does the same job on a phone */
+}

@@ -62,4 +62,5 @@ that folder are real. Replace the folder contents with pipeline output.
 - Search and version-filter logic adapted from ASF OpenSARLab MintPy Recipe Book (BSD-3-Clause).
 - OPERA DISP-S1 and DISP-S1-STATIC, JPL OPERA / ASF DAAC; file layout and rebase rule from opera-adt/opera-utils.
 - Rainfall: NASA POWER (MERRA-2). GPS: Nevada Geodetic Laboratory daily solutions.
-- Basemap: OpenStreetMap contributors. Map library: MapLibre GL JS.
+- Background map: OpenFreeMap (OpenMapTiles, OpenStreetMap contributors). Satellite imagery: USGS The National Map.
+  Map library: MapLibre GL JS.

@@ -15,6 +15,7 @@ const pct = (v) => (v == null ? "n/a" : `${Math.round(v * 100)}%`);
 const boxLine = ([w, s, e, n]) => [[w, s], [e, s], [e, n], [w, n], [w, s]];
 
 export default function Page() {
+  const top = useRef(undefined), roads = useRef([]);
   const mapDiv = useRef(null), map = useRef(null), canvas = useRef(null), marks = useRef([]);
   const cache = useRef({});
   const [sites, setSites] = useState([]);
@@ -43,6 +44,7 @@ export default function Page() {
   const [sig, setSig] = useState(null);         // per-pass signal quality arrays {asc, desc}
   const [tour, setTour] = useState(null);       // {i, auto} while the guided tour runs
   const [copied, setCopied] = useState(false);
+  const [base, setBase] = useState("sat");     // "dark" map or "sat" satellite photo
   const [notesOpen, setNotesOpen] = useState(false);
   const want = useRef(null);                    // state requested by the page link (#site=...&layer=...), applied as data loads
   const firstFit = useRef(true);
@@ -88,14 +90,35 @@ export default function Page() {
     if (map.current) return;
     map.current = new maplibregl.Map({
       container: mapDiv.current,
-      style: { version: 8, sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
-        layers: [{ id: "osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.8, "raster-brightness-max": 0.75 } }] },
+      style: "https://tiles.openfreemap.org/styles/dark",      // free vector map, no key (OpenFreeMap / OpenStreetMap)
       center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, pitchWithRotate: false,
     });
     map.current.touchZoomRotate.disableRotation();
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     map.current.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
-    map.current.on("load", () => setReady(true));
+    const m = map.current;
+    const setup = () => {
+      if (m.getSource("sat")) return;
+      top.current = m.getStyle().layers.find((l) => l.type === "symbol")?.id;      // keep place names above everything we add
+      m.addSource("sat", { type: "raster", tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 16, attribution: "Imagery: USGS The National Map" });
+      m.addLayer({ id: "base-sat", type: "raster", source: "sat", layout: { visibility: "none" }, paint: { "raster-brightness-max": 0.78, "raster-saturation": -0.2 } }, top.current);
+      // Make place names readable over imagery and the radar layer, whatever the style's own colours are.
+      m.getStyle().layers.filter((l) => l.type === "symbol").forEach((l) => {
+        try { m.setPaintProperty(l.id, "text-color", "#f0efec"); m.setPaintProperty(l.id, "text-halo-color", "rgba(10,12,16,0.85)"); m.setPaintProperty(l.id, "text-halo-width", 1.4); } catch {}
+      });
+      roads.current = m.getStyle().layers.filter((l) => l.type === "line" && l["source-layer"] === "transportation").map((l) => l.id);
+      setReady(true);
+    };
+    m.on("load", setup);
+    // Background tiles sometimes fail or get cancelled mid-flight; the map retries them, so keep the console quiet.
+    m.on("error", (e) => { if (!/fetch|tile|AJAX|abort/i.test(e?.error?.message || "")) console.warn(e?.error || e); });
+    // If the vector map never arrives (service down, offline venue Wi-Fi), fall back to plain OpenStreetMap tiles.
+    setTimeout(() => {
+      if (m.isStyleLoaded() || m.getSource("sat")) return;
+      m.once("style.load", setup);
+      m.setStyle({ version: 8, sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
+        layers: [{ id: "osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.8, "raster-brightness-max": 0.6 } }] });
+    }, 8000);
     canvas.current = document.createElement("canvas");
   }, []);
 
@@ -120,7 +143,7 @@ export default function Page() {
     const draw = () => {
       if (m.getSource("boxes")) m.getSource("boxes").setData(boxes);
       else { m.addSource("boxes", { type: "geojson", data: boxes });
-        m.addLayer({ id: "boxes", type: "line", source: "boxes", paint: { "line-color": ["get", "color"], "line-width": 1.5, "line-dasharray": [2, 2] } }); }
+        m.addLayer({ id: "boxes", type: "line", source: "boxes", paint: { "line-color": ["get", "color"], "line-width": 1.5, "line-dasharray": [2, 2] } }, top.current); }
     };
     draw();
     return () => m.off("click", onClick);
@@ -181,12 +204,17 @@ export default function Page() {
     if (src && src._site !== meta.id) { m.removeLayer("sar"); m.removeSource("sar"); src = null; }
     if (!src) {
       m.addSource("sar", { type: "canvas", canvas: c, coordinates: coords, animate: false });
-      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": "nearest", "raster-fade-duration": 0 } }, m.getLayer("boxes") ? "boxes" : undefined);
+      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": "nearest", "raster-fade-duration": 0 } }, m.getLayer("boxes") ? "boxes" : top.current);
       src = m.getSource("sar"); src._site = meta.id;
     }
     src.play(); src.pause(); m.triggerRepaint();
   }, [meta, grid, t, layerKey, ready, mode, lim]);
 
+  useEffect(() => {
+    if (!ready || !map.current) return;
+    map.current.setLayoutProperty("base-sat", "visibility", base === "sat" ? "visible" : "none");
+    roads.current.forEach((id) => { try { map.current.setPaintProperty(id, "line-color", base === "sat" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.12)"); } catch {} });
+  }, [base, ready]);
   const pin = useRef(null);
   useEffect(() => {
     pin.current?.remove(); pin.current = null;
@@ -398,6 +426,10 @@ export default function Page() {
     <div className="shell">
       <div className="map">
         <div ref={mapDiv} />
+        <div className="basesw" role="group" aria-label="Background">
+          <button className={base === "dark" ? "on" : ""} aria-pressed={base === "dark"} onClick={() => setBase("dark")}><span aria-hidden="true">🗺️</span> Map</button>
+          <button className={base === "sat" ? "on" : ""} aria-pressed={base === "sat"} onClick={() => setBase("sat")}><span aria-hidden="true">🛰️</span> Satellite</button>
+        </div>
         {meta && layer && (
           <div className="timebar">
             {step?.point === "timebar" && <div className="tourtip"><span>{step.label}</span><svg viewBox="0 0 24 30" width="22" height="27" aria-hidden="true"><path d="M12 29 L2 15 H8.5 V1 H15.5 V15 H22 Z" fill="#eda100" stroke="#1a1a19" strokeWidth="1.5" strokeLinejoin="round" /></svg></div>}
@@ -410,11 +442,11 @@ export default function Page() {
                 <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
               </div>
               <div className="ramp" style={{ background: `linear-gradient(90deg, rgb(${NEG}), rgb(${MID}), rgb(${POS}))` }} />
-              <div className="row"><span>−{lim.toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span>+{lim.toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
+              <div className="row"><span>−{lim.toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span className="blank">see-through = no reading</span><span>+{lim.toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
             </>) : isImpact ? (<>
               <div className="trow one"><div className="tdate"><span className="muted">before and after</span><b>{meta.event?.name || "Event"}</b></div></div>
               <div className="ramp" style={{ background: `linear-gradient(90deg, rgba(${IMPACT},0.05), rgb(${IMPACT}))` }} />
-              <div className="row"><span>surface unchanged</span><span>surface changed a lot</span></div>
+              <div className="row"><span>surface unchanged</span><span className="blank">see-through = no reading</span><span>surface changed a lot</span></div>
             </>) : (<>
               <div className="ramp" style={{ background: "linear-gradient(90deg, rgb(20,24,32), rgb(150,200,255))" }} />
               <div className="row"><span>0 signal lost</span><span>1 stable signal</span></div>

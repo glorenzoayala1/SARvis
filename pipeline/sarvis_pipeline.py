@@ -117,6 +117,78 @@ SITES = {
                    "and from 0.37 to 0.23 in the other. They disagree on where. Only one direction shows strong change on the "
                    "barrier island, so this map keeps the smaller of the two readings.",
     },
+    # ---- Places around the world, added 2026-11-15. Frames checked against CMR footprints that day (pipeline/scan notes in the README).
+    #      Reference and focus boxes are FIRST GUESSES from general geography; nothing here is checked against ground measurements.
+    "mexico-city": {
+        "name": "Mexico City subsidence, Mexico", "emoji": "", "short": "Mexico City", "story": "A city built on a drained lakebed. Pumping groundwater from the clay beneath it makes the ground sink.",
+        "bbox": (-99.2, 19.33, -98.95, 19.52), "ref_box": (-99.198, 19.395, -99.175, 19.425), "focus_box": (-99.1, 19.36, -98.97, 19.48),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 19, "dir": "A", "frame": 11}, {"id": "desc", "track": 113, "dir": "D", "frame": 79}],
+        "site_height_m": 2240.0,
+    },
+    "kilauea": {
+        "name": "Kilauea volcano, Hawaii", "emoji": "", "short": "Kilauea", "story": "An active volcano. The ground swells as magma collects under the summit and drops when it drains or erupts.",
+        "bbox": (-155.35, 19.33, -155.15, 19.47), "ref_box": (-155.19, 19.44, -155.16, 19.465), "focus_box": (-155.31, 19.38, -155.24, 19.44),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 151, "dir": "A", "frame": 11}, {"id": "desc", "track": 72, "dir": "D", "frame": 79}],
+        "site_height_m": 1100.0,
+    },
+    "reykjanes": {
+        "name": "Reykjanes peninsula, Iceland", "emoji": "", "short": "Reykjanes", "story": "Magma has been collecting under Svartsengi, next to the town of Grindavik, lifting the ground between eruptions.",
+        "bbox": (-22.6, 63.8, -22.25, 63.93), "ref_box": (-22.29, 63.9, -22.26, 63.92), "focus_box": (-22.5, 63.84, -22.36, 63.91),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 159, "dir": "A", "frame": 34}, {"id": "desc", "track": 82, "dir": "D", "frame": 56}],
+        "site_height_m": 40.0,
+    },
+    "delhi": {
+        "name": "Delhi subsidence, India", "emoji": "", "short": "Delhi", "story": "Parts of south-west Delhi sink as groundwater is pumped out faster than it is replaced.",
+        "bbox": (77.0, 28.45, 77.2, 28.62), "ref_box": (77.17, 28.59, 77.195, 28.615), "focus_box": (77.04, 28.5, 77.12, 28.56),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 156, "dir": "A", "frame": 16}, {"id": "desc", "track": 106, "dir": "D", "frame": 74}],
+        "site_height_m": 215.0,
+    },
+    "campi-flegrei": {
+        "name": "Campi Flegrei, Italy", "emoji": "", "short": "Campi Flegrei", "story": "A volcanic caldera under the town of Pozzuoli, near Naples. The ground here has been rising for years.",
+        "bbox": (14.05, 40.78, 14.22, 40.88), "ref_box": (14.19, 40.86, 14.215, 40.878), "focus_box": (14.09, 40.8, 14.16, 40.85),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 43, "dir": "A", "frame": 22}, {"id": "desc", "track": 152, "dir": "D", "frame": 68}],
+        "site_height_m": 40.0,
+    },
+    "jakarta": {
+        "name": "Jakarta subsidence, Indonesia", "emoji": "", "short": "Jakarta", "story": "The north of the city sinks as groundwater is pumped from beneath it, next to a rising sea.",
+        "bbox": (106.7, -6.3, 106.98, -6.08), "ref_box": (106.8, -6.29, 106.84, -6.26), "focus_box": (106.74, -6.16, 106.92, -6.09),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 10, "dir": "A", "frame": 174}, {"id": "desc", "track": 18, "dir": "D", "frame": 92}],
+        "site_height_m": 5.0,
+    },
+    "semarang": {
+        "name": "Semarang subsidence, Indonesia", "emoji": "", "short": "Semarang", "story": "A port city on Java's north coast whose low-lying districts are sinking.",
+        "bbox": (110.33, -7.03, 110.52, -6.92), "ref_box": (110.4, -7.03, 110.43, -7.01), "focus_box": (110.39, -6.985, 110.5, -6.935),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 154, "dir": "A", "frame": 174}, {"id": "desc", "track": 162, "dir": "D", "frame": 92}],
+        "site_height_m": 5.0,
+    },
+    "bangkok": {
+        "name": "Bangkok subsidence, Thailand", "emoji": "", "short": "Bangkok", "story": "A delta city on soft clay. Its south-east has a history of sinking from groundwater pumping.",
+        "bbox": (100.4, 13.55, 100.75, 13.85), "ref_box": (100.42, 13.8, 100.46, 13.84), "focus_box": (100.55, 13.57, 100.73, 13.72),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 112, "dir": "A", "frame": 8}, {"id": "desc", "track": 4, "dir": "D", "frame": 82}],
+        "site_height_m": 2.0,
+    },
+    "lagos": {
+        "name": "Lagos coast, Nigeria", "emoji": "", "short": "Lagos", "story": "A fast-growing coastal city, much of it on reclaimed and low-lying land.",
+        "bbox": (3.3, 6.4, 3.6, 6.62), "ref_box": (3.33, 6.58, 3.37, 6.61), "focus_box": (3.38, 6.41, 3.58, 6.48),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 15, "dir": "A", "frame": 5}, {"id": "desc", "track": 152, "dir": "D", "frame": 85}],
+        "site_height_m": 5.0,
+    },
+    "ho-chi-minh": {
+        "name": "Ho Chi Minh City subsidence, Vietnam", "emoji": "", "short": "Ho Chi Minh City", "story": "A delta city whose southern and western districts sit on soft ground and are reported to be sinking.",
+        "bbox": (106.55, 10.68, 106.8, 10.88), "ref_box": (106.76, 10.85, 106.79, 10.875), "focus_box": (106.58, 10.69, 106.76, 10.78),
+        "gnss_ref": None, "deramp": True, "s1": False, "first_look": True,
+        "tracks": [{"id": "asc", "track": 155, "dir": "A", "frame": 7}, {"id": "desc", "track": 47, "dir": "D", "frame": 83}],
+        "site_height_m": 5.0,
+    },
 }
 FIRST_RUN = False        # True = quick gate run: Central Valley, 3 pairs, no Sentinel-1. False = full run of SITE below.
 SITE = os.environ.get("SARVIS_SITE", "central-valley" if FIRST_RUN else "portuguese-bend")      # or "central-valley" or "destin"
@@ -621,7 +693,7 @@ if ev:
 
 # %%
 # 11. Export for the web app. Values are int16 hundredths of a cm, -32768 = no data, row 0 = north.
-meta = {"id": SITE, "name": cfg["name"], "short": cfg.get("short", SITE), "emoji": cfg.get("emoji", ""), "story": cfg.get("story", ""), "finding": cfg.get("finding", ""),
+meta = {"id": SITE, "name": cfg["name"], "short": cfg.get("short", SITE), "emoji": cfg.get("emoji", ""), "story": cfg.get("story", ""), "first_look": bool(cfg.get("first_look", False)), "finding": cfg.get("finding", ""),
         "event": cfg.get("event"), "bbox": [W, S, E, N], "nx": nx, "ny": ny,
         "units": "cm", "scale": 0.01, "nodata": -32768, "ref_box": list(cfg["ref_box"]),
         "focus_box": list(cfg["focus_box"]),

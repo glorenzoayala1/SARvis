@@ -111,7 +111,7 @@ export default function Page() {
   const [showSettings, setShowSettings] = useState(false);
   useEffect(() => { try { const o = JSON.parse(window.localStorage.getItem("sarvis-options") || "null"); if (o) setOpt({ ...DEFAULTS, ...o, view3d: true }); } catch {} }, []);
   const set = (patch) => setOpt((o) => { const n = { ...o, ...patch }; try { window.localStorage.setItem("sarvis-options", JSON.stringify(n)); } catch {} return n; });
-  const base = opt.base, setBase = (b) => set({ base: b });
+  const base = opt.base === "lidar" && !meta?.lidar ? "sat" : opt.base, setBase = (b) => set({ base: b });
   const uf = opt.inches ? 1 / 2.54 : 1, un = opt.inches ? "in" : "cm";      // data stay in cm; only the display converts
   const [notesOpen, setNotesOpen] = useState(false);
   const [sheet, setSheet] = useState("peek");   // footer height: peek, half or full
@@ -639,6 +639,9 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   useEffect(() => {
     const m = map.current; if (!m || !ready || !meta) return;
     const ids = (meta.backdrops || []).map((_, k) => `backdrop${k}`);
+    if (meta.lidar) { const [w, s, e, n] = meta.lidar.bbox; ids.push("lidar");          // laser-surveyed bare ground, as a third background
+      m.addSource("lidar", { type: "image", url: `data/${meta.id}/${meta.lidar.file}`, coordinates: [[w, n], [e, n], [e, s], [w, s]] });
+      m.addLayer({ id: "lidar", type: "raster", source: "lidar", paint: { "raster-opacity": base === "lidar" ? 1 : 0, "raster-opacity-transition": { duration: 900, delay: 0 }, "raster-fade-duration": 0, "raster-brightness-max": 0.9, "raster-contrast": 0.25 } }, m.getLayer("relief") ? "relief" : top.current); }
     (meta.backdrops || []).forEach((bd, k) => { const [w, s, e, n] = bd.bbox;
       m.addSource(ids[k], { type: "image", url: `data/${meta.id}/${bd.file}`, coordinates: [[w, n], [e, n], [e, s], [w, s]] });
       m.addLayer({ id: ids[k], type: "raster", source: ids[k], paint: { "raster-opacity": base === "sat" ? 1 : 0, "raster-opacity-transition": { duration: 900, delay: 0 }, "raster-fade-duration": 0, "raster-saturation": 0.08, "raster-contrast": 0.08 } }, m.getLayer("relief") ? "relief" : top.current); });
@@ -1069,6 +1072,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
               <div className="seg" aria-label="Background">
                 <button className={base === "sat" ? "on" : ""} aria-pressed={base === "sat"} onClick={() => setBase("sat")}>Satellite</button>
                 <button className={base === "dark" ? "on" : ""} aria-pressed={base === "dark"} onClick={() => setBase("dark")}>Map</button>
+                {meta.lidar && <button className={base === "lidar" ? "on" : ""} aria-pressed={base === "lidar"} onClick={() => setBase("lidar")}>Lidar</button>}
               </div>
             </div>
           </div>
@@ -1206,6 +1210,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         )}
         {meta && layer && tab === "about" && (
           <div className="pane" key="about">
+            {meta.lidar && <div className="card"><h2>Lidar background</h2><p className="muted" style={{ margin: 0 }}>{meta.lidar.credit}</p></div>}
             {meta.backdrop_credit && <div className="card"><h2>Background picture here</h2><p className="muted" style={{ margin: 0 }}>{meta.backdrop_credit}</p></div>}
         {meta && (
           <div className="story" key={meta.id}>

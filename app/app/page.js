@@ -1060,7 +1060,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
           </div>
         )}
         <nav className="tabs" role="tablist" aria-label="Sections">
-          {TABS.map(([k, name]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k && sheet !== "peek" ? "on" : ""} onClick={() => openTab(k)}>{name}</button>)}
+          {TABS.map(([k, name]) => <button key={k} role="tab" aria-selected={tab === k} className={(tab === k && sheet !== "peek" ? "on" : "") + (k === "found" ? " gold" : "")} onClick={() => openTab(k)}>{name}</button>)}
         </nav>
         <div className="sheetbody" ref={bodyEl}>
         {step && (

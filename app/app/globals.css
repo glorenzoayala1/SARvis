@@ -398,3 +398,15 @@ button.brandchip { transition: background .15s, transform .12s; } button.brandch
 @media (prefers-reduced-motion: reduce) { .sitemenu, .sitemenu button { animation: none; } }
 
 .rd-top, .rd-bits { user-select: none; }
+
+/* Findings is the headline page: gold tab, gold-tinted page */
+.tabs button.gold { background: var(--accent); color: #16191d; font-weight: 700; border-radius: 9px; margin: 6px 4px 6px 6px; padding-top: 6px; padding-bottom: 6px; box-shadow: 0 2px 10px rgba(237,161,0,0.3); }
+.tabs button.gold.on { box-shadow: 0 0 0 2px #fff3, 0 2px 12px rgba(237,161,0,0.45); }
+.tabs button.gold::after { display: none; }
+.pane#found { background: linear-gradient(180deg, rgba(237,161,0,0.16), rgba(237,161,0,0.05) 60%); border: 1px solid rgba(237,161,0,0.38); border-radius: 14px; padding: 14px; }
+.pane#found .overall { font-weight: 600; color: #ffe2a0; }
+.pane#found .finding { background: rgba(22,25,29,0.72); border-color: rgba(237,161,0,0.32); }
+.pane#found .finding.here { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pane#found .finding .hero { color: #ffc247; }
+.pane#found .finding h2 { color: #ffe2a0; }
+@media (max-width: 560px) { .tabs button.gold { margin: 6px 2px 6px 4px; padding-left: 8px; padding-right: 8px; } .pane#found { padding: 10px; } }

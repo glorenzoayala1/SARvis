@@ -55,7 +55,7 @@ const pct = (v) => (v == null ? "n/a" : `${Math.round(v * 100)}%`);
 const boxLine = ([w, s, e, n]) => [[w, s], [e, s], [e, n], [w, n], [w, s]];
 
 export default function Page() {
-  const top = useRef(undefined), roads = useRef([]);
+  const top = useRef(undefined), roads = useRef([]), blds = useRef([]);
   const mapDiv = useRef(null), map = useRef(null), canvas = useRef(null), marks = useRef([]);
   const cache = useRef({});
   const [sites, setSites] = useState([]);
@@ -84,7 +84,7 @@ export default function Page() {
   const [sig, setSig] = useState(null);         // per-pass signal quality arrays {asc, desc}
   const [tour, setTour] = useState(null);       // {i, auto} while the guided tour runs
   const [copied, setCopied] = useState(false);
-  const DEFAULTS = { base: "sat", view3d: false, contours: true, labels: true, smooth: true, boxes: true, stations: true, inches: false, speed: "normal", tall: "medium" };
+  const DEFAULTS = { base: "sat", view3d: false, contours: true, labels: true, smooth: true, boxes: true, stations: true, inches: false, speed: "normal", tall: "medium", clouds: true, strength: 0.62 };
   const [opt, setOpt] = useState(DEFAULTS);
   const [showSettings, setShowSettings] = useState(false);
   useEffect(() => { try { const o = JSON.parse(window.localStorage.getItem("sarvis-options") || "null"); if (o) setOpt({ ...DEFAULTS, ...o, view3d: false }); } catch {} }, []);
@@ -92,6 +92,11 @@ export default function Page() {
   const base = opt.base, setBase = (b) => set({ base: b });
   const uf = opt.inches ? 1 / 2.54 : 1, un = opt.inches ? "in" : "cm";      // data stay in cm; only the display converts
   const [notesOpen, setNotesOpen] = useState(false);
+  const [sheet, setSheet] = useState("peek");   // footer height: peek, half or full
+  const [dragH, setDragH] = useState(null);
+  const [tab, setTab] = useState("view");
+  const sheetEl = useRef(null), bodyEl = useRef(null);
+  useEffect(() => { if (bodyEl.current) bodyEl.current.scrollTop = 0; }, [tab, pick?.i, pick?.j, siteId]);
   const want = useRef(null);                    // state requested by the page link (#site=...&layer=...), applied as data loads
   const firstFit = useRef(true);
 
@@ -137,12 +142,13 @@ export default function Page() {
     map.current = new maplibregl.Map({
       container: mapDiv.current,
       style: "https://tiles.openfreemap.org/styles/dark",      // free vector map, no key (OpenFreeMap / OpenStreetMap)
-      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 70,
+      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 78,
     });
     map.current.touchZoomRotate.disableRotation();
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     map.current.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
     const m = map.current;
+    if (typeof window !== "undefined") window.__sarvisMap = m;      // handy for debugging in the console
     const setup = () => {
       if (m.getSource("sat")) return;
       top.current = m.getStyle().layers.find((l) => l.type === "symbol")?.id;      // keep place names above everything we add
@@ -162,6 +168,9 @@ export default function Page() {
       });
       roads.current = m.getStyle().layers.filter((l) => l.type === "line" && l["source-layer"] === "transportation").map((l) => l.id);
       roads.current.forEach((id) => { try { m.setPaintProperty(id, "line-color-transition", { duration: 900, delay: 0 }); } catch {} });
+      // building footprints from the street map read as black blots over imagery; fade them out there
+      blds.current = m.getStyle().layers.filter((l) => l["source-layer"] === "building").map((l) => l.id);
+      document.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");       // start collapsed; the (i) button opens it
       setReady(true);
     };
     m.on("load", setup);
@@ -188,10 +197,10 @@ export default function Page() {
     const m = map.current, [w, s, e, n] = meta.bbox;
     const phone = window.innerWidth <= 800;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    m.fitBounds([[w, s], [e, n]], { padding: { top: phone ? 48 : 40, bottom: phone ? 120 : 120, left: phone ? 16 : 40, right: phone ? 16 : 40 }, duration: firstFit.current || calm ? 0 : 1600, essential: true });
+    m.fitBounds([[w, s], [e, n]], { padding: { top: 64, bottom: 196, left: phone ? 16 : 40, right: phone ? 16 : 40 }, duration: firstFit.current || calm ? 0 : 1600, essential: true });
     firstFit.current = false;
     if (phone) document.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");   // start collapsed; the (i) button still opens it
-    const onClick = (ev) => { const p = toPixel(ev.lngLat.lng, ev.lngLat.lat); if (p) { setPick(p); if (window.innerWidth <= 800) setTimeout(() => cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); } };
+    const onClick = (ev) => { const p = toPixel(ev.lngLat.lng, ev.lngLat.lat); if (p) { setPick(p); setTab("spot"); setSheet((v) => (v === "peek" ? "half" : v)); } };
     m.on("click", onClick);
     const boxes = { type: "FeatureCollection", features: [["#f0efec", meta.ref_box], ["#eda100", meta.focus_box]].filter((b) => b[1])
       .map(([color, b]) => ({ type: "Feature", properties: { color }, geometry: { type: "LineString", coordinates: boxLine(b) } })) };
@@ -210,7 +219,7 @@ export default function Page() {
     if (!meta || !ctx?.gnss || !map.current || !opt.stations) return;
     ctx.gnss.stations.forEach((st) => {
       const el = document.createElement("button"); el.className = "station"; el.textContent = st.id; el.title = `${st.kind === "survey" ? "Survey point" : "GPS station"} ${st.id}`;
-      el.onclick = (ev) => { ev.stopPropagation(); const p = toPixel(st.lon, st.lat); if (p) setPick({ ...p, station: st.id }); };
+      el.onclick = (ev) => { ev.stopPropagation(); const p = toPixel(st.lon, st.lat); if (p) { setPick({ ...p, station: st.id }); setTab("spot"); setSheet((v) => (v === "peek" ? "half" : v)); } };
       marks.current.push(new maplibregl.Marker({ element: el }).setLngLat([st.lon, st.lat]).addTo(map.current));
     });
   }, [meta, ctx, opt.stations]);
@@ -250,24 +259,25 @@ export default function Page() {
       ? (layer.palette === "impact" ? (v) => [...ramp(RAMP.impact, v), Math.min(235, 255 * Math.max(0, v - 0.06) * 1.7)] : (v) => [...ramp(RAMP.coh, v), 215])
       : (v) => { const m = Math.min(1, Math.abs(v)); return [...ramp(v < 0 ? RAMP.neg : RAMP.pos, m), Math.min(232, 255 * Math.max(0, m - 0.1) * 2.3)]; };
     drawField(c, vals, nx, ny, color, layer.static || !opt.contours ? 0 : contourStep / lim, opt.smooth);
-    if (map.current.getLayer("sar")) { map.current.setPaintProperty("sar", "raster-resampling", opt.smooth ? "linear" : "nearest"); map.current.setLayoutProperty("sar", "visibility", opt.view3d && bars3d ? "none" : "visible"); }
+    if (map.current.getLayer("sar")) { map.current.setPaintProperty("sar", "raster-resampling", opt.smooth ? "linear" : "nearest"); map.current.setPaintProperty("sar", "raster-opacity", opt.strength); }
     // A canvas source repaints straight from the canvas: no image decode, no aborted loads while scrubbing.
     const [w, s, e, n] = meta.bbox, coords = [[w, n], [e, n], [e, s], [w, s]], m = map.current;
     let src = m.getSource("sar");
     if (src && src._site !== meta.id) { m.removeLayer("sar"); m.removeSource("sar"); src = null; }      // canvas size changes with the site
     if (!src) {
       m.addSource("sar", { type: "canvas", canvas: c, coordinates: coords, animate: false });
-      m.addLayer({ id: "sar", type: "raster", source: "sar", layout: { visibility: opt.view3d && bars3d ? "none" : "visible" }, paint: { "raster-resampling": opt.smooth ? "linear" : "nearest", "raster-fade-duration": 0 } }, m.getLayer("boxes") ? "boxes" : top.current);
+      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": opt.smooth ? "linear" : "nearest", "raster-fade-duration": 0, "raster-opacity": opt.strength, "raster-opacity-transition": { duration: 300, delay: 0 } } }, m.getLayer("boxes") ? "boxes" : top.current);
       src = m.getSource("sar"); src._site = meta.id;
     }
     src.play(); src.pause(); m.triggerRepaint();
-  }, [meta, grid, t, layerKey, ready, mode, lim, opt.contours, opt.smooth, opt.view3d]);
+  }, [meta, grid, t, layerKey, ready, mode, lim, opt.contours, opt.smooth, opt.view3d, opt.strength]);
   const colorCss = (v) => { const m = Math.min(1, Math.abs(v)); return `rgb(${ramp(v < 0 ? RAMP.neg : RAMP.pos, m)})`; };
 
   useEffect(() => {
     if (!ready || !map.current) return;
     map.current.setPaintProperty("base-sat", "raster-opacity", base === "sat" ? 1 : 0);        // cross-fades between the two backgrounds
     roads.current.forEach((id) => { try { map.current.setPaintProperty(id, "line-color", base === "sat" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.12)"); } catch {} });
+    blds.current.forEach((id) => { try { map.current.setLayoutProperty(id, "visibility", base === "sat" ? "none" : "visible"); } catch {} });
   }, [base, ready]);
   const pin = useRef(null);
   useEffect(() => {
@@ -390,7 +400,7 @@ export default function Page() {
         say: (d) => `The rain and wind charts carry the same yellow line. ${d.share !== null ? `Across the yellow box, ${Math.round(100 * d.share)}% of the ground changed by more than 30%. ` : ""}Pink means changed, not destroyed: tides and wet soil count too.` },
     ];
     return [
-      { title: "Watch it move", layer: "up", mode: "total", play: true, point: "timebar", label: "One step = 12 days",
+      { title: "Watch it move", layer: "up", mode: "total", play: true, glow: "timebar", tab: "about",
         say: () => `${meta.story} Red is sinking, blue is rising.` },
       { title: "The fastest spot", layer: "up", mode: "total", pick: "hot", point: "hot", label: "Moved the most", glow: "pickcard",
         say: (d) => d.hot ? `This spot went ${d.hot.v < 0 ? "down" : "up"} ${cm(d.hot.v)} between ${fmtDate(d.layer.dates[0])} and ${fmtDate(d.layer.dates[d.layer.dates.length - 1])}. Each dot on the chart is one satellite pass.` : "Finding the fastest spot…" },
@@ -406,7 +416,7 @@ export default function Page() {
   const fitSite = (duration) => {
     if (!meta || !map.current) return;
     const [w, s, e, n] = meta.bbox, phone = window.innerWidth <= 800;
-    map.current.fitBounds([[w, s], [e, n]], { padding: { top: phone ? 48 : 40, bottom: 120, left: phone ? 16 : 40, right: phone ? 16 : 40 }, duration, essential: true });
+    map.current.fitBounds([[w, s], [e, n]], { padding: { top: 64, bottom: 196, left: phone ? 16 : 40, right: phone ? 16 : 40 }, duration, essential: true });
   };
   const tourMark = useRef(null), wasTouring = useRef(false);
   useEffect(() => {
@@ -415,6 +425,7 @@ export default function Page() {
     if (step.mode && mode !== step.mode) { setMode(step.mode); return; }
     if (!grid || grid._key !== layer.key) return;
     setPlaying(!!step.play);
+    setTab(step.tab || ({ pickcard: "spot", weather: "weather", coverage: "compare" })[step.glow] || "about"); setSheet((v) => (v === "peek" ? "half" : v));
     const last = layer.static ? 0 : layer.dates.length - 1;
     if (!layer.static) setT(step.play ? 0 : last);
     // a play tick can still land after this; settle on the last date once the animation timer is gone
@@ -448,8 +459,8 @@ export default function Page() {
     const t1 = step.glow && setTimeout(() => {
       const card = document.getElementById(step.glow); if (!card) return;
       card.classList.add("spot");
-      if (window.innerWidth > 800) card.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "nearest" });
-    }, 500);
+      if (step.glow !== "timebar") card.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "nearest" });
+    }, 650);
     return () => clearTimeout(t1);
   }, [tour?.i, step, ready, hot?.i, hot?.j, layerKey]);
   useEffect(() => {
@@ -490,39 +501,92 @@ export default function Page() {
       m.addLayer({ id: "slice", type: "line", source: "slice", paint: { "line-color": "#f0efec", "line-width": 1.6 } }, top.current); }
   }, [sliceOk, pick?.i, pick?.j, sliceDir, ready, meta]);
 
-  // 3D view: each block of pixels becomes a column whose height is the size of the change, so the
-  // shape grows as the timeline plays. Height shows amount of change, not real elevation.
+  // 3D view: the real terrain (stretched a little so slopes read), the radar colours draped over it, and a thin
+  // column on each block of pixels. Column height is proportional to the measured change at one stated scale.
+  const TERRAIN_X = 1.5;
+  const mPerCm = useMemo(() => {
+    if (!meta || !layer || layer.static) return 0;
+    const widthM = (meta.bbox[2] - meta.bbox[0]) * 111320 * Math.cos((((meta.bbox[1] + meta.bbox[3]) / 2) * Math.PI) / 180);
+    return niceStep((0.012 * widthM) / lim) * { low: 0.5, medium: 1, high: 2 }[opt.tall];
+  }, [meta, layerKey, lim, opt.tall]);
   useEffect(() => {
     const m = map.current; if (!m || !ready) return;
     const on = opt.view3d && bars3d && meta && grid && layer && grid._key === layer.key;
-    let fc = { type: "FeatureCollection", features: [] };
-    if (on) {
-      const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 4500)));
-      const widthM = (e - w) * 111320 * Math.cos((((s + n) / 2) * Math.PI) / 180), top3 = widthM * { low: 0.1, medium: 0.2, high: 0.35 }[opt.tall];
-      const dx = (e - w) / nx, dy = (n - s) / ny;
-      for (let j = 0; j < ny; j += B) for (let i = 0; i < nx; i += B) {
-        let sum = 0, cnt = 0;
-        for (let jj = j; jj < Math.min(ny, j + B); jj++) for (let ii = i; ii < Math.min(nx, i + B); ii++) {
-          const v = layer.static ? (grid[jj * nx + ii] === layer.nodata ? null : grid[jj * nx + ii] / layer.max) : valueAt(grid, layer, t, jj * nx + ii);
-          if (v !== null) { sum += v; cnt++; }
+    let fc = { type: "FeatureCollection", features: [] }, live = true;
+    const push = () => { if (!live) return; if (m.getSource("bars")) m.getSource("bars").setData(fc);
+      else { m.addSource("bars", { type: "geojson", data: fc });
+        m.addLayer({ id: "bars", type: "fill-extrusion", source: "bars", paint: { "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": true } }, top.current); } };
+    if (!on) { push(); return; }
+    const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 2600)));
+    const widthM = (e - w) * 111320 * Math.cos((((s + n) / 2) * Math.PI) / 180), impactTop = widthM * 0.018 * { low: 0.5, medium: 1, high: 2 }[opt.tall];
+    const dx = (e - w) / nx, dy = (n - s) / ny, cols = [];
+    for (let j = 0; j < ny; j += B) for (let i = 0; i < nx; i += B) {
+      let sum = 0, cnt = 0;
+      for (let jj = j; jj < Math.min(ny, j + B); jj++) for (let ii = i; ii < Math.min(nx, i + B); ii++) {
+        const v = layer.static ? (grid[jj * nx + ii] === layer.nodata ? null : grid[jj * nx + ii] / layer.max) : valueAt(grid, layer, t, jj * nx + ii);
+        if (v !== null) { sum += v; cnt++; }
+      }
+      if (!cnt) continue;
+      const v = sum / cnt, k = layer.static ? v : v / lim; if (Math.abs(k) < 0.15) continue;          // leave out near-zero noise
+      const cx = w + (i + B / 2) * dx, cy = n - (j + B / 2) * dy, hw = B * dx * 0.13, hh = B * dy * 0.13;   // thin: about a quarter of the block
+      cols.push({ lon: cx, lat: cy, hw, hh, h: layer.static ? Math.min(1, v) * impactTop : Math.abs(v) * mPerCm,
+        c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, Math.abs(k)))})` });
+    }
+    // stand each column on the ground: its base is the terrain height there
+    elevations(cols, 12).catch(() => cols.map(() => 0)).then((el) => {
+      fc.features = cols.map((q, k) => { const b = Math.max(0, el[k]) * TERRAIN_X;
+        return { type: "Feature", properties: { b, h: b + q.h, c: q.c }, geometry: { type: "Polygon", coordinates: [[[q.lon - q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat + q.hh]]] } }; });
+      push();
+    });
+    return () => { live = false; };
+  }, [ready, opt.view3d, opt.tall, bars3d, meta, grid, layerKey, t, mode, lim, mPerCm]);
+  useEffect(() => {            // tilt into the terrain and move in close on the focus area; flatten on the way out
+    const m = map.current; if (!m || !ready || !meta) return;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (opt.view3d) {
+      if (!m.getSource("dem")) m.addSource("dem", { type: "raster-dem", tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: 256, maxzoom: 14, attribution: "Terrain: Mapzen, AWS Open Data" });
+      m.setTerrain({ source: "dem", exaggeration: TERRAIN_X });
+      m.dragRotate.enable(); m.touchZoomRotate.enableRotation();
+      const f = meta.focus_box || meta.bbox, cam = m.cameraForBounds([[f[0], f[1]], [f[2], f[3]]], { padding: { top: 90, bottom: 230, left: 30, right: 30 } });
+      m.easeTo({ center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: Math.min((cam?.zoom ?? 12) + 0.35, 15.5), pitch: 68, bearing: -18, duration: calm ? 0 : 1800, essential: true });
+    } else {
+      m.dragRotate.disable(); m.touchZoomRotate.disableRotation(); m.setTerrain(null);
+      m.easeTo({ pitch: 0, bearing: 0, duration: calm ? 0 : 900, essential: true }); setTimeout(() => fitSite(calm ? 0 : 900), calm ? 0 : 950);
+    }
+  }, [opt.view3d, ready, meta?.id]);
+  // Clouds in 3D: how many depends on NASA's daily cloud cover for the selected date. Sizes and heights are set
+  // relative to the site (bases about 260 to 600 m up, a low marine-layer height that stays below the close camera, stretched like the land), so they sit in scale with the terrain.
+  const cloudPct = useMemo(() => {
+    if (!ctx?.cloud || !layer) return null;
+    const d = layer.static ? (meta?.event ? null : null) : layer.dates[t], k = d ? ctx.cloud.dates.indexOf(d) : -1;
+    return k >= 0 ? ctx.cloud.pct[k] : null;
+  }, [ctx, layerKey, t, meta]);
+  useEffect(() => {
+    const m = map.current; if (!m || !ready) return;
+    const fc = { type: "FeatureCollection", features: [] };
+    if (opt.view3d && opt.clouds && meta && cloudPct !== null) {
+      const [w, s, e, n] = meta.bbox, lat0 = (s + n) / 2, mLon = 111320 * Math.cos((lat0 * Math.PI) / 180), mLat = 110540, widthM = (e - w) * mLon;
+      let seed = [...(layer.dates?.[t] || "0")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7); const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+      const count = Math.round((cloudPct / 100) * 30);
+      for (let c = 0; c < count; c++) {
+        const cx = w + (rnd() * 1.3 - 0.15) * (e - w), cy = s + (rnd() * 1.3 - 0.15) * (n - s), base = (260 + rnd() * 340) * TERRAIN_X, thick = (90 + rnd() * 110) * TERRAIN_X;
+        const puffs = 4 + Math.floor(rnd() * 4), size = widthM * (0.014 + rnd() * 0.018);
+        for (let q = 0; q < puffs; q++) {
+          const px = cx + ((rnd() - 0.5) * size * 2.2) / mLon, py = cy + ((rnd() - 0.5) * size * 1.0) / mLat, r = size * (0.5 + rnd() * 0.6), ring = [];
+          // three stacked tiers, each narrower, so a puff reads as a rounded mound instead of a flat disc
+          const b0 = base + rnd() * 40, th0 = thick * (0.7 + rnd() * 0.6);
+          [[1, 0, 0.4], [0.74, 0.4, 0.75], [0.42, 0.75, 1]].forEach(([k, lo, hi]) => {
+            const tier = [];
+            for (let a = 0; a <= 18; a++) { const th = (a / 18) * 2 * Math.PI; tier.push([px + (Math.cos(th) * r * k) / mLon, py + (Math.sin(th) * r * k * 0.8) / mLat]); }
+            fc.features.push({ type: "Feature", properties: { b: b0 + th0 * lo, h: b0 + th0 * hi }, geometry: { type: "Polygon", coordinates: [tier] } });
+          });
         }
-        if (!cnt) continue;
-        const v = sum / cnt, k = layer.static ? v : v / lim, mag = Math.min(1.3, Math.abs(k)); if (mag < 0.15) continue;          // leave out near-zero noise
-        const x0 = w + i * dx, x1 = w + Math.min(nx, i + B) * dx, y0 = n - j * dy, y1 = n - Math.min(ny, j + B) * dy;
-        fc.features.push({ type: "Feature", properties: { h: mag * top3, c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, mag))})` },
-          geometry: { type: "Polygon", coordinates: [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]] } });
       }
     }
-    if (m.getSource("bars")) m.getSource("bars").setData(fc);
-    else { m.addSource("bars", { type: "geojson", data: fc });
-      m.addLayer({ id: "bars", type: "fill-extrusion", source: "bars", paint: { "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.92, "fill-extrusion-vertical-gradient": true } }, top.current); }
-  }, [ready, opt.view3d, opt.tall, bars3d, meta, grid, layerKey, t, mode, lim]);
-  useEffect(() => {            // tilt the camera in and out of 3D
-    const m = map.current; if (!m || !ready) return;
-    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (opt.view3d) { m.dragRotate.enable(); m.touchZoomRotate.enableRotation(); m.easeTo({ pitch: 58, bearing: -24, duration: calm ? 0 : 1400, essential: true }); }
-    else { m.dragRotate.disable(); m.touchZoomRotate.disableRotation(); m.easeTo({ pitch: 0, bearing: 0, duration: calm ? 0 : 900, essential: true }); }
-  }, [opt.view3d, ready]);
+    if (m.getSource("clouds")) m.getSource("clouds").setData(fc);
+    else { m.addSource("clouds", { type: "geojson", data: fc });
+      m.addLayer({ id: "clouds", type: "fill-extrusion", source: "clouds", paint: { "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": "#f6f7f9", "fill-extrusion-opacity": 0.42, "fill-extrusion-vertical-gradient": true } }, top.current); }
+  }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t]);
   useEffect(() => { if (tour && opt.view3d) set({ view3d: false }); }, [tour]);
 
   // Soft value labels on the map: walk outward from the biggest change in three directions and
@@ -573,22 +637,58 @@ export default function Page() {
   const SENS = SENSORS.filter(([k]) => meta?.layers.some((l) => (l.sensor || "nisar") === k));
   const fmtCm = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v * uf).toFixed(1)} ${unit}`;
 
+  const TABS = [["view", "View"], ["spot", "Spot"], ["weather", "Weather"], ["compare", "Compare"], ["about", "About"]].filter(([k]) => k !== "compare" || (meta && !meta.event && (cov || SENS.length > 1)));
+  const openTab = (k) => { setTab(k); setSheet((v) => (v === "peek" ? "half" : v)); };
+  const grab = useRef(null);
+  const onGrabDown = (e) => { const el = sheetEl.current; grab.current = { y: e.clientY, h: el.offsetHeight, moved: false }; e.currentTarget.setPointerCapture(e.pointerId); };
+  const onGrabMove = (e) => { const g = grab.current; if (!g) return; const d = g.y - e.clientY; if (Math.abs(d) > 4) g.moved = true; if (g.moved) setDragH(Math.max(120, Math.min(window.innerHeight * 0.92, g.h + d))); };
+  const onGrabUp = () => {
+    const g = grab.current; grab.current = null; if (!g) return;
+    if (!g.moved) { setSheet((v) => (v === "peek" ? "half" : v === "half" ? "full" : "peek")); return; }
+    const h = sheetEl.current.offsetHeight, vh = window.innerHeight, snaps = [["peek", 176], ["half", vh * 0.52], ["full", vh * 0.88]];
+    setSheet(snaps.reduce((a, b) => (Math.abs(b[1] - h) < Math.abs(a[1] - h) ? b : a))[0]); setDragH(null);
+  };
+
   return (
-    <div className="shell">
-      <div className="map">
-        <div ref={mapDiv} />
-        <div className="basesw" role="group" aria-label="Background">
-          <button className={base === "dark" ? "on" : ""} aria-pressed={base === "dark"} onClick={() => setBase("dark")}>Map</button>
-          <button className={base === "sat" ? "on" : ""} aria-pressed={base === "sat"} onClick={() => setBase("sat")}>Satellite</button>
-          <span className="sep" />
-          <button className={!opt.view3d ? "on" : ""} aria-pressed={!opt.view3d} onClick={() => set({ view3d: false })}>2D</button>
-          <button className={opt.view3d ? "on" : ""} aria-pressed={opt.view3d} disabled={!bars3d} onClick={() => { setTour(null); set({ view3d: true }); }}>3D</button>
+    <div className="stage">
+      <div className="map"><div ref={mapDiv} /></div>
+      <div className="topbar">
+        <div className="brandchip"><span className="mark" aria-hidden="true" /><b>SARvis</b>{meta && <span className="sitename">{meta.short}</span>}</div>
+        <div className="topbtns">
+          {meta && layer && <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Tour</button>}
+          <button className="ghost" aria-expanded={showSettings} onClick={() => setShowSettings(true)}>Settings</button>
         </div>
+      </div>
+      {meta?.synthetic && <div className="demochip"><b>Demo data.</b> Radar layers are synthetic.</div>}
+      {meta && layer && !pick && grid && !step && sheet === "peek" && <div className="hint">Tap the map to read one spot</div>}
+      {showSettings && (
+        <div className="modal" onClick={() => setShowSettings(false)}>
+          <div className="card settings" role="dialog" aria-label="Settings" onClick={(e) => e.stopPropagation()}>
+            <div className="shead"><h2>Settings</h2><button className="ghost small" onClick={() => setShowSettings(false)}>Done</button></div>
+            <h3>On the map</h3>
+            <Toggle label="Smooth shading" hint="Off shows the raw 80 m pixels" on={opt.smooth} onChange={(v) => set({ smooth: v })} />
+            <Toggle label="Contour lines" on={opt.contours} onChange={(v) => set({ contours: v })} />
+            <Toggle label="Number labels" on={opt.labels} onChange={(v) => set({ labels: v })} />
+            <Toggle label="Reference and focus boxes" on={opt.boxes} onChange={(v) => set({ boxes: v })} />
+            <Toggle label="GPS stations" on={opt.stations} onChange={(v) => set({ stations: v })} />
+            <h3>3D</h3>
+            <Toggle label="Clouds" hint="Amount follows NASA's daily cloud cover" on={opt.clouds} onChange={(v) => set({ clouds: v })} />
+            <Pick label="Column height" value={opt.tall} onChange={(v) => set({ tall: v })} items={[["low", "Low"], ["medium", "Medium"], ["high", "High"]]} />
+            <h3>Numbers and playback</h3>
+            <Pick label="Units" value={opt.inches ? "in" : "cm"} onChange={(v) => set({ inches: v === "in" })} items={[["cm", "Centimetres"], ["in", "Inches"]]} />
+            <Pick label="Playback speed" value={opt.speed} onChange={(v) => set({ speed: v })} items={[["slow", "Slow"], ["normal", "Normal"], ["fast", "Fast"]]} />
+            <div className="actions">
+              <button className="ghost" onClick={copyLink}>{copied ? "Link copied" : "Copy link to this view"}</button>
+              <button className="ghost" onClick={() => set({ ...DEFAULTS })}>Reset to defaults</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <section ref={sheetEl} className={"sheet " + sheet + (dragH !== null ? " dragging" : "")} style={dragH !== null ? { height: dragH } : undefined} aria-label="Controls and details">
+        <div className="grab" role="button" tabIndex={0} aria-label="Drag up for more, or press to expand" onPointerDown={onGrabDown} onPointerMove={onGrabMove} onPointerUp={onGrabUp} onPointerCancel={onGrabUp}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSheet((v) => (v === "peek" ? "half" : v === "half" ? "full" : "peek")); } }}><i /></div>
         {meta && layer && (
-          <div className="timebar">
-            {step?.point === "timebar" && <div className="tourtip"><span>{step.label}</span><svg viewBox="0 0 24 30" width="22" height="27" aria-hidden="true"><path d="M12 29 L2 15 H8.5 V1 H15.5 V15 H22 Z" fill="#eda100" stroke="#1a1a19" strokeWidth="1.5" strokeLinejoin="round" /></svg></div>}
-            {!pick && grid && !step && <div className="hint">Tap the map to read one spot</div>}
-            {!grid && <div className="hint">Loading…</div>}
+          <div className="timebar" id="timebar">
             {!layer.static ? (<>
               <div className="trow">
                 <button className="play" aria-label={playing ? "Pause" : "Play"} onClick={() => setPlaying((p) => !p)}>{playing ? "❚❚" : "▶"}</button>
@@ -596,7 +696,7 @@ export default function Page() {
                 <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
               </div>
               <div className="ramp" style={{ background: `linear-gradient(90deg, ${css([...RAMP.neg].reverse().map(([t, c]) => [(1 - t) / 2, c]))}, rgba(120,120,116,0.25) 50%, ${css(RAMP.pos.map(([t, c]) => [0.5 + t / 2, c]))})` }} />
-              <div className="row"><span>−{(lim * uf).toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span className="blank">{opt.view3d && bars3d ? "height = size of change, stretched" : `${opt.contours ? `lines every ${Math.round(contourStep * uf * 100) / 100} ${unit} · ` : ""}see-through = no reading`}</span><span>+{(lim * uf).toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
+              <div className="row"><span>−{(lim * uf).toFixed(1)} {unit} {ends ? ends[0] : ""}</span><span className="blank">{opt.view3d && bars3d ? `column: 1 ${un} of change = ${Math.round((mPerCm / uf) * 10) / 10} m · land height ×${TERRAIN_X}${opt.clouds && cloudPct !== null ? ` · sky ${Math.round(cloudPct)}% cloud that day` : ""}` : `${opt.contours ? `lines every ${Math.round(contourStep * uf * 100) / 100} ${unit} · ` : ""}see-through = no reading`}</span><span>+{(lim * uf).toFixed(1)} {unit} {ends ? ends[1] : ""}</span></div>
             </>) : isImpact ? (<>
               <div className="trow one"><div className="tdate"><span className="muted">before and after</span><b>{meta.event?.name || "Event"}</b></div></div>
               <div className="ramp" style={{ background: `linear-gradient(90deg, rgba(246,200,216,0.08), ${css(RAMP.impact)})` }} />
@@ -607,40 +707,10 @@ export default function Page() {
             </>)}
           </div>
         )}
-      </div>
-      <aside className={"panel" + (step ? " touring" : "")}>
-        <header>
-          <h1><span className="mark" aria-hidden="true" /><span className="brand">SARvis</span></h1>
-          <p className="sub">Watching the ground move from space, every 12 days.</p>
-          {meta && layer && (
-            <div className="actions hide-on-tour">
-              <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Take the tour</button>
-              <button className="ghost" aria-expanded={showSettings} onClick={() => setShowSettings((v) => !v)}>Settings</button>
-              <button className="ghost" onClick={copyLink}>{copied ? "Link copied" : "Copy link to this view"}</button>
-            </div>
-          )}
-        </header>
-        {showSettings && !step && (
-          <div className="card settings" role="region" aria-label="Settings">
-            <div className="shead"><h2>Settings</h2><button className="ghost small" onClick={() => setShowSettings(false)}>Close</button></div>
-            <h3>Where to look</h3>
-            <label htmlFor="s-site">Site</label>
-            <select id="s-site" value={siteId || ""} onChange={(e) => setSiteId(e.target.value)}>{sites.map((st) => <option key={st.id} value={st.id}>{st.short || st.id}</option>)}</select>
-            <Pick label="Background" value={opt.base} onChange={(v) => set({ base: v })} items={[["sat", "Satellite"], ["dark", "Map"]]} />
-            <Pick label="View" value={opt.view3d ? "3d" : "2d"} onChange={(v) => { if (v === "3d") setTour(null); set({ view3d: v === "3d" }); }} items={[["2d", "Flat"], ["3d", "3D columns"]]} />
-            <Pick label="3D height" value={opt.tall} onChange={(v) => set({ tall: v })} items={[["low", "Low"], ["medium", "Medium"], ["high", "High"]]} />
-            <h3>On the map</h3>
-            <Toggle label="Smooth shading" hint="Off shows the raw 80 m pixels" on={opt.smooth} onChange={(v) => set({ smooth: v })} />
-            <Toggle label="Contour lines" on={opt.contours} onChange={(v) => set({ contours: v })} />
-            <Toggle label="Number labels" on={opt.labels} onChange={(v) => set({ labels: v })} />
-            <Toggle label="Reference and focus boxes" on={opt.boxes} onChange={(v) => set({ boxes: v })} />
-            <Toggle label="GPS stations" on={opt.stations} onChange={(v) => set({ stations: v })} />
-            <h3>Numbers and playback</h3>
-            <Pick label="Units" value={opt.inches ? "in" : "cm"} onChange={(v) => set({ inches: v === "in" })} items={[["cm", "Centimetres"], ["in", "Inches"]]} />
-            <Pick label="Playback speed" value={opt.speed} onChange={(v) => set({ speed: v })} items={[["slow", "Slow"], ["normal", "Normal"], ["fast", "Fast"]]} />
-            <button className="ghost" style={{ marginTop: 12 }} onClick={() => set({ ...DEFAULTS })}>Reset to defaults</button>
-          </div>
-        )}
+        <nav className="tabs" role="tablist" aria-label="Sections">
+          {TABS.map(([k, name]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k && sheet !== "peek" ? "on" : ""} onClick={() => openTab(k)}>{name}</button>)}
+        </nav>
+        <div className="sheetbody" ref={bodyEl}>
         {step && (
           <div className="tour" role="region" aria-label="Guided tour">
             <div className="tourtop">
@@ -650,7 +720,7 @@ export default function Page() {
             <div className="tourbody" key={tour.i}>
               <h3><span className="ticon" aria-hidden="true">{tour.i + 1}</span>{step.title}</h3>
               <p>{step.say({ hot, layer, cov, share: hot?.share ?? null, stat: chart?.stat })}</p>
-              {step.glow && <div className="cue">{step.glow === "weather" ? "See the weather charts" : step.glow === "coverage" ? "See the coverage numbers" : "See the chart"} {typeof window !== "undefined" && window.innerWidth <= 800 ? "below" : "highlighted below"}</div>}
+              {step.glow && <div className="cue">{step.glow === "weather" ? "See the weather charts" : step.glow === "coverage" ? "See the comparison numbers" : step.glow === "timebar" ? "Watch the timeline above" : "See the chart"}{step.glow === "timebar" ? "" : " highlighted below"}</div>}
             </div>
             {tour.auto && <div className="tourbar" key={`b${tour.i}`}><i /></div>}
             <div className="tourbtns">
@@ -660,42 +730,56 @@ export default function Page() {
             </div>
           </div>
         )}
-        {meta?.synthetic && <div className="banner"><b>Demo data.</b> Radar motion is synthetic. Rainfall and GPS are real.</div>}
-        <div className="seg hide-on-tour" role="tablist" aria-label="Site">
+        {meta && layer && tab === "view" && (
+          <div className="pane" key={"view" + meta.id}>
+            <div><label>Site</label>
+        <div className="seg" role="tablist" aria-label="Site">
           {sites.map((st) => <button key={st.id} role="tab" aria-selected={st.id === siteId} className={"tab" + (st.id === siteId ? " on" : "")} onClick={() => setSiteId(st.id)}>{st.short || st.id}</button>)}
         </div>
-        {meta && (
-          <div className="story hide-on-tour" key={meta.id}>
-            <div><b>{meta.name}</b><p>{meta.story}</p>{meta.event && <p className="muted">{meta.event.name}, {meta.event.when}. {meta.event.note}</p>}</div>
-          </div>
-        )}
-        {meta && layer && (<>
-          <div className="hide-on-tour">
+            </div>
+          <div>
             <label>Sensor</label>
             <div className="seg">
               {SENS.map(([k, name, band]) => (
                 <button key={k} className={sensor === k ? "on" : ""} aria-pressed={sensor === k} onClick={() => choose(k, layer.kind)}><i style={{ background: C[k] }} />{name} <small>{band}</small></button>))}
             </div>
           </div>
-          <div className="hide-on-tour">
+          <div>
             <label>Measurement</label>
             <div className="chips">
               {KINDS.filter(([k]) => has(sensor, k)).map(([k, name]) => <button key={k} className={layer.kind === k ? "on" : ""} aria-pressed={layer.kind === k} onClick={() => choose(sensor, k)}>{name}</button>)}
             </div>
           </div>
+            <div className="two">
+          {!layer.static && (
+            <div className="seg" aria-label="Show">
+              <button className={!speed ? "on" : ""} aria-pressed={!speed} onClick={() => setMode("total")}>Total change</button>
+              <button className={speed ? "on" : ""} aria-pressed={speed} onClick={() => setMode("speed")}>Speed</button>
+            </div>
+          )}
+              <div className="seg" aria-label="Flat or 3D">
+                <button className={!opt.view3d ? "on" : ""} aria-pressed={!opt.view3d} onClick={() => set({ view3d: false })}>Flat</button>
+                <button className={opt.view3d ? "on" : ""} aria-pressed={opt.view3d} disabled={!bars3d} onClick={() => { setTour(null); set({ view3d: true }); }}>3D terrain</button>
+              </div>
+              <label className="strength"><span>Colour strength <b>{Math.round(opt.strength * 100)}%</b></span>
+                <input type="range" min="20" max="100" step="2" value={Math.round(opt.strength * 100)} onChange={(e) => set({ strength: +e.target.value / 100 })} aria-label="How strongly the radar colours cover the map" /></label>
+              <div className="seg" aria-label="Background">
+                <button className={base === "sat" ? "on" : ""} aria-pressed={base === "sat"} onClick={() => setBase("sat")}>Satellite</button>
+                <button className={base === "dark" ? "on" : ""} aria-pressed={base === "dark"} onClick={() => setBase("dark")}>Map</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {meta && layer && tab === "spot" && (
+          <div className="pane grid" key="spot">
+            <div className="col">
           {hot && (
-            <button className="finding hide-on-tour" onClick={() => setPick({ i: hot.i, j: hot.j, lon: hot.lon, lat: hot.lat })}>
+            <button className="finding" onClick={() => { setPick({ i: hot.i, j: hot.j, lon: hot.lon, lat: hot.lat }); setTab("spot"); }}>
               <span>{isImpact
                 ? <><b>{Math.round(100 * hot.share)}%</b> of the focus area lost more than 30% of its usual radar signal across the storm. Strongest spot: <b>{Math.round(100 * hot.v)}%</b>.</>
                 : <>Biggest change in the focus area: <b>{`${hot.v > 0 ? "+" : "−"}${Math.abs(hot.v * uf).toFixed(1)} ${un}`}</b>{ends ? ` ${hot.v >= 0 ? ends[1] : ends[0]}` : ""} since {fmtDate(layer.dates[0])}.</>}
                 <small> Tap to see that spot.</small></span>
             </button>
-          )}
-          {!layer.static && (
-            <div className="seg hide-on-tour" aria-label="Show">
-              <button className={!speed ? "on" : ""} aria-pressed={!speed} onClick={() => setMode("total")}>Total change</button>
-              <button className={speed ? "on" : ""} aria-pressed={speed} onClick={() => setMode("speed")}>Speed</button>
-            </div>
           )}
           <div className="card" id="pickcard" ref={cardRef}>
             <h2>{pick ? (pick.station ? `Ground check at station ${pick.station}` : `Spot at ${pick.lat.toFixed(4)}, ${pick.lon.toFixed(4)}`) : "Pick a spot"}</h2>
@@ -706,6 +790,8 @@ export default function Page() {
             {chart && <Chart key={`m${pick.i}-${pick.j}-${layerKey}-${mode}`} k={uf} lines={chart.lines} markX={toDay(layer.dates[t])} eventX={eventX} eventLabel={meta.event?.name} />}
             {chart?.stat && <p className="muted" style={{ margin: "8px 0 0" }}>Radar minus GPS, root-mean-square: <b style={{ color: "var(--ink)" }}>{(chart.stat.rms * uf).toFixed(2)} {un}</b> over {chart.stat.n} dates{ctx.gnss.ref ? ` (GPS relative to station ${ctx.gnss.ref})` : " (GPS not referenced; compare vertical only)"}.</p>}
           </div>
+            </div>
+            <div className="col">
           {sliceOk && (
             <div className="card" id="slice">
               <h2>Slice through this spot</h2>
@@ -718,6 +804,11 @@ export default function Page() {
                 : <SliceChart slice={slice} color={layer.static ? (v) => `rgb(${ramp(RAMP.impact, v)})` : (v) => colorCss(v / lim)} unit={layer.static ? "" : unit} k={layer.static ? 1 : uf} isShare={!!layer.static} />}
             </div>
           )}
+            </div>
+          </div>
+        )}
+        {meta && layer && tab === "weather" && (
+          <div className="pane grid" key="weather">
           {rain && rain.pts.length > 0 && (
             <div className="card" id="weather">
               <h2>Daily rainfall, mm</h2>
@@ -743,6 +834,21 @@ export default function Page() {
               <p className="muted" style={{ margin: "6px 0 0" }}>{ctx.wind.source}</p>
             </div>
           )}
+          </div>
+        )}
+        {meta && layer && tab === "compare" && (
+          <div className="pane grid" key="compare">
+          {cov && !meta.event && (
+            <div className="card" id="coverage">
+              <h2>How often each radar got a reading in the focus area</h2>
+              <p className="muted" style={{ margin: "0 0 10px" }}>Average share of passes with a usable measurement inside the yellow box{cov.window ? `, ${fmtDate(cov.window[0])} to ${fmtDate(cov.window[1])} (the weeks both radars cover)` : ""}.</p>
+              <div className="tiles">
+                {SENS.map(([k, name, band]) => (
+                  <div key={k} className="tile"><span className="swatch" style={{ background: C[k] }} /><span className="muted">{name} ({band})</span>
+                    <div className="big">{pct(cov[k]?.asc)} <small>ascending</small> · {pct(cov[k]?.desc)} <small>descending</small></div></div>))}
+              </div>
+            </div>
+          )}
           {wl && SENS.length > 1 && (
             <div className="card">
               <h2>Why the two radars can disagree</h2>
@@ -758,17 +864,15 @@ export default function Page() {
               <p className="muted" style={{ margin: "10px 0 0" }}>Shorter wavelengths (X-band, about 3 cm) see finer detail but lose fast motion sooner. Longer ones (P-band, 30 to 100 cm) are used for forests, not ground motion.</p>
             </div>
           )}
-          {cov && !meta.event && (
-            <div className="card" id="coverage">
-              <h2>How often each radar got a reading in the focus area</h2>
-              <p className="muted" style={{ margin: "0 0 10px" }}>Average share of passes with a usable measurement inside the yellow box{cov.window ? `, ${fmtDate(cov.window[0])} to ${fmtDate(cov.window[1])} (the weeks both radars cover)` : ""}.</p>
-              <div className="tiles">
-                {SENS.map(([k, name, band]) => (
-                  <div key={k} className="tile"><span className="swatch" style={{ background: C[k] }} /><span className="muted">{name} ({band})</span>
-                    <div className="big">{pct(cov[k]?.asc)} <small>ascending</small> · {pct(cov[k]?.desc)} <small>descending</small></div></div>))}
-              </div>
-            </div>
-          )}
+          </div>
+        )}
+        {meta && layer && tab === "about" && (
+          <div className="pane" key="about">
+        {meta && (
+          <div className="story" key={meta.id}>
+            <div><b>{meta.name}</b><p>{meta.story}</p>{meta.event && <p className="muted">{meta.event.name}, {meta.event.when}. {meta.event.note}</p>}</div>
+          </div>
+        )}
           <details className="card" open={notesOpen} onToggle={(e) => setNotesOpen(e.currentTarget.open)}>
             <summary>How to read this</summary>
             <ul className="notes">
@@ -781,8 +885,10 @@ export default function Page() {
               <li>Source: {meta.source}, provisional products, not yet fully validated by NASA.</li>
             </ul>
           </details>
-        </>)}
-      </aside>
+          </div>
+        )}
+        </div>
+      </section>
     </div>
   );
 }

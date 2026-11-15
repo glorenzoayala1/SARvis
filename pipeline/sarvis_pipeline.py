@@ -430,7 +430,7 @@ def http(u, binary=False):
 
 if RUN_RAIN:
     r0 = ymd(day(D0) - 30)
-    u = ("https://power.larc.nasa.gov/api/temporal/daily/point?parameters=PRECTOTCORR,WS10M,WS10M_MAX,WD10M&community=AG"
+    u = ("https://power.larc.nasa.gov/api/temporal/daily/point?parameters=PRECTOTCORR,WS10M,WS10M_MAX,WD10M,CLOUD_AMT&community=AG"
          f"&longitude={(W + E) / 2:.4f}&latitude={(S + N) / 2:.4f}&start={r0}&end={D1}&format=JSON")
     j = json.loads(http(u))
     pr = j["properties"]["parameter"]["PRECTOTCORR"]
@@ -439,6 +439,8 @@ if RUN_RAIN:
     par = j["properties"]["parameter"]; clean = lambda k: [None if v < -900 else round(v, 2) for v in par[k].values()]
     context["wind"] = {"dates": list(par["WS10M"]), "speed": clean("WS10M"), "max": clean("WS10M_MAX"), "dir": clean("WD10M"),
                        "source": "NASA POWER 10 m wind (" + ", ".join(j["header"]["sources"]) + "), m/s; direction = where the wind blows from"}
+    if "CLOUD_AMT" in par:      # share of sky covered by cloud that day, used for the clouds in the 3D view
+        context["cloud"] = {"dates": list(par["CLOUD_AMT"]), "pct": clean("CLOUD_AMT"), "source": "NASA POWER CLOUD_AMT, daily mean cloud cover, %"}
     print("rain days", len(pr), "total mm %.0f" % sum(v for v in pr.values() if v > 0),
           "| strongest daily max wind %.1f m/s" % max(v for v in par["WS10M_MAX"].values() if v > -900))
 

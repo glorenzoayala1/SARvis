@@ -817,6 +817,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             <div className="chips">
               {KINDS.filter(([k]) => has(sensor, k)).map(([k, name]) => <button key={k} className={layer.kind === k ? "on" : ""} aria-pressed={layer.kind === k} onClick={() => choose(sensor, k)}>{name}</button>)}
             </div>
+            {meta.dropped && <p className="muted" style={{ margin: "8px 0 0" }}>{meta.dropped}</p>}
           </div>
             <div className="two">
           {!layer.static && (

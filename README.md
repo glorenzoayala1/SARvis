@@ -34,7 +34,7 @@ for Portuguese Bend (landslide) and the Central Valley near Corcoran (subsidence
 
 Deploy on Vercel: import the repo, set Root Directory to `app`, framework Next.js.
 
-All three sites in `app/public/data` are REAL NISAR data (runs of 2026-11-14, both tracks; Portuguese Bend and Central Valley also have Sentinel-1). Central Valley was pinned to GPS station HANF afterwards with `pipeline/tie_to_gps.py`, because its reference patch turned out to be moving (radar and GPS disagreed by up to 15 cm before pinning). Rainfall and GPS in
+All three sites in `app/public/data` are REAL NISAR data (runs of 2026-11-14, both tracks; Portuguese Bend and Central Valley also have Sentinel-1). Central Valley was pinned to GPS station HANF afterwards with `pipeline/tie_to_gps.py`, because its reference patch turned out to be moving (radar and GPS disagreed by up to 15 cm before pinning). Its grid was then halved with `pipeline/shrink.py` (43 MB to 9 MB) and its east-west layers were left out, because the two viewing directions disagree there by several centimetres. Rainfall and GPS in
 that folder are real. Replace the folder contents with pipeline output.
 
 ## Self-test without Earthdata

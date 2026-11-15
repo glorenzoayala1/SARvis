@@ -104,7 +104,15 @@ export default function Page() {
       m.addLayer({ id: "base-sat", type: "raster", source: "sat", layout: { visibility: "none" }, paint: { "raster-brightness-max": 0.78, "raster-saturation": -0.2 } }, top.current);
       // Make place names readable over imagery and the radar layer, whatever the style's own colours are.
       m.getStyle().layers.filter((l) => l.type === "symbol").forEach((l) => {
-        try { m.setPaintProperty(l.id, "text-color", "#f0efec"); m.setPaintProperty(l.id, "text-halo-color", "rgba(10,12,16,0.85)"); m.setPaintProperty(l.id, "text-halo-width", 1.4); } catch {}
+        try {
+          m.setPaintProperty(l.id, "text-color", "#ffffff"); m.setPaintProperty(l.id, "text-halo-color", "rgba(6,8,12,0.95)");
+          m.setPaintProperty(l.id, "text-halo-width", 2.2); m.setPaintProperty(l.id, "text-halo-blur", 0.4); m.setPaintProperty(l.id, "text-opacity", 1);
+          const big = (v) => (typeof v === "number" ? Math.round(v * 1.25 * 10) / 10 : v);          // 25% larger type, whatever form the style uses
+          const sz = m.getLayoutProperty(l.id, "text-size");
+          if (typeof sz === "number") m.setLayoutProperty(l.id, "text-size", big(sz));
+          else if (sz && Array.isArray(sz.stops)) m.setLayoutProperty(l.id, "text-size", { ...sz, stops: sz.stops.map(([z, v]) => [z, big(v)]) });
+          else if (Array.isArray(sz) && sz[0] === "interpolate") m.setLayoutProperty(l.id, "text-size", sz.map((v, k) => (k >= 4 && k % 2 === 0 ? big(v) : v)));
+        } catch {}
       });
       roads.current = m.getStyle().layers.filter((l) => l.type === "line" && l["source-layer"] === "transportation").map((l) => l.id);
       setReady(true);

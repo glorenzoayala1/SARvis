@@ -150,7 +150,7 @@ export default function Page() {
     map.current = new maplibregl.Map({
       container: mapDiv.current,
       style: "https://tiles.openfreemap.org/styles/dark",      // free vector map, no key (OpenFreeMap / OpenStreetMap)
-      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 78,
+      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 84,
     });
     map.current.touchZoomRotate.disableRotation();
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
@@ -512,6 +512,8 @@ export default function Page() {
   // 3D view: the real terrain (stretched a little so slopes read), the radar colours draped over it, and a thin
   // column on each block of pixels. Column height is proportional to the measured change at one stated scale.
   const TERRAIN_X = 1.5;
+const CLOUD_BASE_M = 1000;    // lowest cloud layer height above sea level, before the same vertical stretch as the land. Illustrative, not measured:
+                              // the layer is raised when needed so it stays above the default 3D camera.
 const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wind speed, so the movement is visible
   const mPerCm = useMemo(() => {
     if (!meta || !layer || layer.static) return 0;
@@ -541,12 +543,9 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       cols.push({ lon: cx, lat: cy, hw, hh, h: layer.static ? Math.min(1, v) * impactTop : Math.abs(v) * mPerCm,
         c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, Math.abs(k)))})` });
     }
-    // stand each column on the ground: its base is the terrain height there
-    elevations(cols, 12).catch(() => cols.map(() => 0)).then((el) => {
-      fc.features = cols.map((q, k) => { const b = Math.max(0, el[k]) * TERRAIN_X;
-        return { type: "Feature", properties: { b, h: b + q.h, c: q.c }, geometry: { type: "Polygon", coordinates: [[[q.lon - q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat + q.hh]]] } }; });
-      push();
-    });
+    // the map itself lifts each column onto the terrain, so heights here are measured from the ground
+    fc.features = cols.map((q) => ({ type: "Feature", properties: { b: 0, h: q.h, c: q.c }, geometry: { type: "Polygon", coordinates: [[[q.lon - q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat + q.hh]]] } }));
+    push();
     return () => { live = false; };
   }, [ready, opt.view3d, opt.tall, bars3d, meta, grid, layerKey, t, mode, lim, mPerCm]);
   useEffect(() => {            // tilt into the terrain and move in close on the focus area; flatten on the way out
@@ -557,7 +556,11 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       m.setTerrain({ source: "dem", exaggeration: TERRAIN_X });
       m.dragRotate.enable(); m.touchZoomRotate.enableRotation();
       const f = meta.focus_box || meta.bbox, cam = m.cameraForBounds([[f[0], f[1]], [f[2], f[3]]], { padding: { top: 90, bottom: 230, left: 30, right: 30 } });
-      m.easeTo({ center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: Math.min((cam?.zoom ?? 12) + 0.35, 15.5), pitch: 68, bearing: -18, duration: calm ? 0 : 1800, essential: true });
+      const z3 = Math.min((cam?.zoom ?? 12) + 0.35, 15.5), latc = (f[1] + f[3]) / 2;
+      // how high the camera ends up in this view (metres): the cloud layer is kept above it, so you look along its underside
+      camAlt3d.current = Math.cos((77 * Math.PI) / 180) * ((m.getContainer().clientHeight / 2) / Math.tan((36.87 / 2) * Math.PI / 180)) * ((40075016.686 * Math.cos((latc * Math.PI) / 180)) / (512 * 2 ** z3)) + 400;
+      setCam3d(camAlt3d.current);
+      m.easeTo({ center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: -18, duration: calm ? 0 : 1800, essential: true });
     } else {
       m.dragRotate.disable(); m.touchZoomRotate.disableRotation(); m.setTerrain(null);
       m.easeTo({ pitch: 0, bearing: 0, duration: calm ? 0 : 900, essential: true }); setTimeout(() => fitSite(calm ? 0 : 900), calm ? 0 : 950);
@@ -565,90 +568,90 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   }, [opt.view3d, ready, meta?.id]);
   // Clouds in 3D: how many depends on NASA's daily cloud cover for the selected date. Sizes and heights are set
   // relative to the site (bases about 260 to 600 m up, a low marine-layer height that stays below the close camera, stretched like the land), so they sit in scale with the terrain.
+  const camAlt3d = useRef(0); const [cam3d, setCam3d] = useState(0);
   const cloudPct = useMemo(() => {
     if (!ctx?.cloud || !layer) return null;
     const d = layer.static ? (meta?.event ? null : null) : layer.dates[t], k = d ? ctx.cloud.dates.indexOf(d) : -1;
     return k >= 0 ? ctx.cloud.pct[k] : null;
   }, [ctx, layerKey, t, meta]);
-  // Cloud pictures were generated with fal.ai (public/clouds.webp holds two). Each cloud is one picture that always
-  // faces the camera. How many: NASA's daily cloud cover. Which way they drift: NASA's daily wind direction, sped up.
-  const cloudData = useRef({ list: [], ext: null, vx: 0, vy: 0, t0: 0, still: true });
+  // Clouds in 3D are one continuous layer high over the site, drawn as a flat sheet with a cloud pattern.
+  // How much of the sheet is cloud: NASA's daily cloud cover. Which way it drifts: NASA's daily wind direction, sped up.
+  // From the close 3D camera you look along the underside of the layer towards the skyline.
+  const cloudData = useRef({ on: false });
   useEffect(() => {
     const m = map.current; if (!m || !ready) return;
-    const list = []; let ext = null, vx = 0, vy = 0;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let d = { on: false };
     if (opt.view3d && opt.clouds && meta && cloudPct !== null) {
-      const [w, s, e, n] = meta.bbox, lat0 = (s + n) / 2, mLon = 111320 * Math.cos((lat0 * Math.PI) / 180), mLat = 110540, widthM = (e - w) * mLon;
-      const padX = (e - w) * 0.15, padY = (n - s) * 0.15; ext = [w - padX, s - padY, e + padX, n + padY];
-      const day = layer.dates?.[t] || "0";
-      let seed = [...day].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7); const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
-      const count = Math.round((cloudPct / 100) * 44);
-      for (let c = 0; c < count; c++) {
-        const hw = widthM * (0.022 + rnd() * 0.026), base = (180 + rnd() * 240) * TERRAIN_X;       // half-width in metres; base height above sea level
-        list.push({ lon: ext[0] + rnd() * (ext[2] - ext[0]), lat: ext[1] + rnd() * (ext[3] - ext[1]), hw, alt: base + hw * 0.5, pic: rnd() < 0.5 ? 0 : 1, flip: rnd() < 0.5, a: 0.72 + rnd() * 0.2 });
-      }
-      const k = ctx?.wind ? ctx.wind.dates.indexOf(day) : -1;
-      if (k >= 0 && !calm) { const to = ((ctx.wind.dir[k] + 180) * Math.PI) / 180, sp = Math.max(1, ctx.wind.speed[k]) * CLOUD_SPEEDUP;   // "dir" is where the wind comes from
-        vx = (Math.sin(to) * sp) / mLon; vy = (Math.cos(to) * sp) / mLat; }                                 // degrees per second
+      const [w, s, e, n] = meta.bbox, lon0 = (w + e) / 2, lat0 = (s + n) / 2, day = layer.dates?.[t] || "0";
+      const seed = [...day].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+      const k = ctx?.wind ? ctx.wind.dates.indexOf(day) : -1; let vx = 0, vy = 0;
+      if (k >= 0 && !calm) { const to = ((ctx.wind.dir[k] + 180) * Math.PI) / 180, sp = (Math.max(1, ctx.wind.speed[k]) * CLOUD_SPEEDUP) / 1000;   // "dir" is where the wind comes from; km per second
+        vx = Math.sin(to) * sp; vy = Math.cos(to) * sp; }
+      d = { on: true, lon0, lat0, alt: Math.max(CLOUD_BASE_M * TERRAIN_X, camAlt3d.current * 1.3), cover: cloudPct / 100, ox: (seed % 977) * 1.7, oy: (seed % 619) * 2.3, vx, vy, t0: performance.now() };
     }
-    cloudData.current = { list, ext, vx, vy, t0: performance.now(), still: !vx && !vy };
-    if (typeof window !== "undefined") window.__sarvisClouds = list.length;
+    cloudData.current = d;
+    if (typeof window !== "undefined") { window.__sarvisClouds = d.on ? d.cover : null; window.__sarvisCloudD = d; }
     if (!m.getLayer("clouds")) m.addLayer({ id: "clouds", type: "custom", renderingMode: "2d",
       onAdd(_, gl) {
         const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return o; };
         const pr = gl.createProgram();
-        gl.attachShader(pr, sh(gl.VERTEX_SHADER, `attribute vec3 a_pos; attribute vec2 a_corner; attribute float a_hw; attribute vec2 a_uv; attribute float a_alpha;
-          uniform mat4 u_m; uniform vec2 u_vp; varying vec2 v_uv; varying float v_alpha;
-          float px(vec4 p, vec3 off) { vec4 q = u_m * vec4(a_pos + off, 1.0); return length((q.xy / q.w - p.xy / p.w) * u_vp * 0.5); }
-          void main() { vec4 p = u_m * vec4(a_pos, 1.0);
-            float hx = max(px(p, vec3(a_hw, 0.0, 0.0)), max(px(p, vec3(0.0, a_hw, 0.0)), px(p, vec3(0.0, 0.0, a_hw))));      // half-width on screen, in pixels
-            v_alpha = a_alpha * clamp(1.7 - hx / (0.45 * u_vp.x), 0.0, 1.0);                         // fade a cloud out as the camera passes through it
-            v_uv = a_uv;
-            gl_Position = p.w > 0.0 ? p + vec4(a_corner * vec2(hx, hx * 0.5) * 2.0 / u_vp * p.w, 0.0, 0.0) : vec4(2.0, 2.0, 2.0, 1.0); }`));
-        gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision mediump float; uniform sampler2D u_tex; varying vec2 v_uv; varying float v_alpha;
-          void main() { gl_FragColor = texture2D(u_tex, v_uv) * v_alpha; }`));
+        gl.attachShader(pr, sh(gl.VERTEX_SHADER, `attribute vec3 a_pos; attribute vec2 a_km; uniform mat4 u_m; uniform float u_ground; varying vec2 v_km;
+          uniform vec3 u_ctr;
+          void main() { float wide = u_ground > 0.5 ? 20.0 : 1.0; v_km = a_km * wide;
+            vec3 q = vec3(u_ctr.xy + (a_pos.xy - u_ctr.xy) * wide, u_ground > 1.5 ? a_pos.z * 30.0 : (u_ground > 0.5 ? 0.0 : a_pos.z));
+            vec4 p = u_m * vec4(q, 1.0); p.z = (u_ground > 1.5 ? 0.9999 : 0.9995) * p.w; gl_Position = p; }`));     // pinned to the far depth: land and columns stay in front
+        gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision highp float; varying vec2 v_km; uniform vec2 u_off; uniform float u_cover; uniform float u_below; uniform float u_ground; uniform vec2 u_cam;
+          float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+          float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.03 + 17.0; a *= 0.5; } return s; }
+          void main() { float dist = length(v_km - u_cam); vec3 hz = vec3(0.80, 0.86, 0.92);
+            if (u_ground > 1.5) { gl_FragColor = vec4(mix(vec3(0.33, 0.54, 0.86), hz, smoothstep(30.0, 900.0, dist)), 1.0); return; }      // open sky behind everything
+            if (u_ground > 0.5) { float f = smoothstep(9.0, 24.0, dist); gl_FragColor = vec4(hz * f, f); return; }                // distant land fades into haze up to the skyline
+            vec2 p = (v_km + u_off) / 2.6;
+            float n = 0.72 * fbm(p) + 0.28 * fbm(p * 0.23 + 40.0) / 0.97;                // fine billows on top of broad patches
+            float th = 0.70 - 0.44 * u_cover;                                             // more cover -> lower bar -> more of the sheet is cloud
+            float d = smoothstep(th, th + 0.2, n), thick = smoothstep(th + 0.05, th + 0.45, n);
+            float haze = smoothstep(6.0, 110.0, dist);
+            vec3 under = mix(vec3(0.93, 0.94, 0.96), vec3(0.55, 0.59, 0.66), thick);     // seen from below: thicker cloud is darker
+            vec3 sky = mix(vec3(0.36, 0.56, 0.86), vec3(0.74, 0.84, 0.94), smoothstep(2.0, 50.0, dist));
+            vec3 below = mix(mix(sky, under, d), hz, haze);
+            float aAbove = d * 0.38 * (1.0 - smoothstep(8.0, 30.0, dist));               // seen from above: thin and see-through so the data stays readable
+            vec4 above = vec4(vec3(0.97, 0.98, 1.0) * aAbove, aAbove);
+            gl_FragColor = mix(above, vec4(below, 1.0), u_below); }`));
         gl.linkProgram(pr);
         this.pr = pr; this.buf = gl.createBuffer(); this.vao = gl.createVertexArray ? gl.createVertexArray() : null;   // our own vertex state, so the map's layers are left untouched
-        this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), corner: gl.getAttribLocation(pr, "a_corner"), hw: gl.getAttribLocation(pr, "a_hw"), uv: gl.getAttribLocation(pr, "a_uv"), al: gl.getAttribLocation(pr, "a_alpha"),
-          m: gl.getUniformLocation(pr, "u_m"), vp: gl.getUniformLocation(pr, "u_vp"), tex: gl.getUniformLocation(pr, "u_tex") };
-        this.img = new Image(); this.img.onload = () => { this.imgReady = true; map.current?.triggerRepaint(); }; this.img.src = "clouds.webp";
+        this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), km: gl.getAttribLocation(pr, "a_km"), m: gl.getUniformLocation(pr, "u_m"), off: gl.getUniformLocation(pr, "u_off"), cover: gl.getUniformLocation(pr, "u_cover"), below: gl.getUniformLocation(pr, "u_below"), ground: gl.getUniformLocation(pr, "u_ground"), cam: gl.getUniformLocation(pr, "u_cam"), ctr: gl.getUniformLocation(pr, "u_ctr") };
       },
       render(gl, mx) {
-        const d = cloudData.current, L = this.loc; if (!d.list.length || !this.imgReady) return;
-        if (!this.tex) { this.tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, this.tex);
-          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.img); gl.generateMipmap(gl.TEXTURE_2D);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-          gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); }
-        // where every cloud is right now: drifted with the wind, wrapped around the edges of the area, faded near those edges
-        const [x0, y0, x1, y1] = d.ext, W = x1 - x0, H = y1 - y0, sec = (performance.now() - d.t0) / 1000, wrap = (v, lo, span) => lo + ((((v - lo) % span) + span) % span);
-        const arr = new Float32Array(d.list.length * 6 * 9); let o = 0;
-        const order = d.list.map((c) => { const lon = wrap(c.lon + d.vx * sec, x0, W), lat = wrap(c.lat + d.vy * sec, y0, H), mc = maplibregl.MercatorCoordinate.fromLngLat([lon, lat], c.alt);
-          const fx = Math.min(lon - x0, x1 - lon) / W, fy = Math.min(lat - y0, y1 - lat) / H, edge = Math.min(1, Math.min(fx, fy) / 0.07);
-          return { c, mc, edge, depth: mx[3] * mc.x + mx[7] * mc.y + mx[11] * mc.z + mx[15] }; }).sort((p, q) => q.depth - p.depth);       // far ones first
-        for (const { c, mc, edge } of order) {
-          const hw = c.hw * mc.meterInMercatorCoordinateUnits(), v0 = c.pic * 0.5, u0 = c.flip ? 1 : 0, u1 = c.flip ? 0 : 1;
-          for (const [cx, cy] of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) {
-            arr[o++] = mc.x; arr[o++] = mc.y; arr[o++] = mc.z; arr[o++] = cx; arr[o++] = cy; arr[o++] = hw;
-            arr[o++] = cx < 0 ? u0 : u1; arr[o++] = v0 + (cy > 0 ? 0 : 0.5); arr[o++] = c.a * edge;
-          }
-        }
+        const d = cloudData.current, L = this.loc, mm = map.current; if (!d.on || !mm) return;
+        // a sheet far wider than the view, centred on the site, so it runs past the skyline in every direction
+        const R = 3000, c = maplibregl.MercatorCoordinate.fromLngLat([d.lon0, d.lat0], d.alt), u = c.meterInMercatorCoordinateUnits() * 1000, arr = new Float32Array(30); let o = 0;
+        for (const [x, y] of [[-R, -R], [R, -R], [R, R], [-R, -R], [R, R], [-R, R]]) { arr[o++] = c.x + x * u; arr[o++] = c.y - y * u; arr[o++] = c.z; arr[o++] = x; arr[o++] = y; }
+        // is the camera under the layer (look along its underside) or over it (look down through it)?
+        const tr = mm.transform, ppm = (512 * 2 ** mm.getZoom()) / (40075016.686 * Math.cos((mm.getCenter().lat * Math.PI) / 180));      // screen pixels per metre at the map centre
+        const camAlt = (Math.cos((mm.getPitch() * Math.PI) / 180) * tr.cameraToCenterDistance) / ppm + (tr.elevation || 0) * TERRAIN_X;
+        const below = Math.min(1, Math.max(0, (d.alt - camAlt) / 150)), sec = (performance.now() - d.t0) / 1000;
+        // where the camera stands, in km east and north of the site centre: haze thickens with distance from there
+        const ctr = mm.getCenter(), br = (mm.getBearing() * Math.PI) / 180, back = (Math.sin((mm.getPitch() * Math.PI) / 180) * tr.cameraToCenterDistance) / ppm / 1000;
+        const camE = (ctr.lng - d.lon0) * 111.32 * Math.cos((d.lat0 * Math.PI) / 180) - Math.sin(br) * back, camN = (ctr.lat - d.lat0) * 110.54 - Math.cos(br) * back;
         gl.useProgram(this.pr); if (this.vao) gl.bindVertexArray(this.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
-        [[L.pos, 3, 0], [L.corner, 2, 12], [L.hw, 1, 20], [L.uv, 2, 24], [L.al, 1, 32]].forEach(([l, sz, off]) => { gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, sz, gl.FLOAT, false, 36, off); });
-        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.vp, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.tex); gl.uniform1i(L.tex, 0);
-        gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        gl.drawArrays(gl.TRIANGLES, 0, d.list.length * 6);
+        gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, 20, 0); gl.enableVertexAttribArray(L.km); gl.vertexAttribPointer(L.km, 2, gl.FLOAT, false, 20, 12);
+        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x, c.y, c.z);
+        gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.disable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 1); gl.drawArrays(gl.TRIANGLES, 0, 6);            // haze over the far land, drawn at sea level
+        gl.enable(gl.DEPTH_TEST); gl.uniform1f(L.ground, 2); gl.drawArrays(gl.TRIANGLES, 0, 6);             // open sky; land and columns stay in front
+        gl.uniform1f(L.ground, 0); gl.drawArrays(gl.TRIANGLES, 0, 6);                                       // the cloud layer
         if (this.vao) gl.bindVertexArray(null);
       } });            // added last: anything placed lower is painted over when the terrain is drawn
     m.triggerRepaint();
-    if (cloudData.current.still || !list.length) return;
-    let raf = 0, skip = false;                                   // keep the map redrawing (about 30 times a second) while clouds are drifting
+    if (!d.on || (!d.vx && !d.vy)) return;
+    let raf = 0, skip = false;                                   // keep the map redrawing (about 30 times a second) while the layer drifts
     const tick = () => { skip = !skip; if (!skip) m.triggerRepaint(); raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t, ctx]);
+  }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t, ctx, cam3d]);
   useEffect(() => { if (tour && opt.view3d) set({ view3d: false }); }, [tour]);
 
   // Soft value labels on the map: walk outward from the biggest change in three directions and
@@ -734,7 +737,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             <Toggle label="Reference and focus boxes" on={opt.boxes} onChange={(v) => set({ boxes: v })} />
             <Toggle label="GPS stations" on={opt.stations} onChange={(v) => set({ stations: v })} />
             <h3>3D</h3>
-            <Toggle label="Clouds" hint="Amount and drift direction follow NASA's daily cloud cover and wind; drift is sped up 12 times" on={opt.clouds} onChange={(v) => set({ clouds: v })} />
+            <Toggle label="Clouds" hint="A cloud layer over the site. Cover and drift direction follow NASA's daily figures; drift is sped up 12 times" on={opt.clouds} onChange={(v) => set({ clouds: v })} />
             <Pick label="Column height" value={opt.tall} onChange={(v) => set({ tall: v })} items={[["low", "Low"], ["medium", "Medium"], ["high", "High"]]} />
             <h3>Numbers and playback</h3>
             <Pick label="Units" value={opt.inches ? "in" : "cm"} onChange={(v) => set({ inches: v === "in" })} items={[["cm", "Centimetres"], ["in", "Inches"]]} />

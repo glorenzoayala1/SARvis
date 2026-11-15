@@ -622,10 +622,12 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const m = map.current; if (!m || !ready) return;
     const clear = () => { colMarks.current.forEach((k) => k.remove()); colMarks.current = []; };
     const draw = () => { clear();
-      if (!opt.view3d || !opt.labels || !colsRef.current.length || !zoom3d.current || m.getZoom() < zoom3d.current + 0.5) return;
+      if (!opt.view3d || !opt.labels || !colsRef.current.length || !zoom3d.current) return;
       const W = m.getContainer().clientWidth, H = m.getContainer().clientHeight, kept = [];
+      const close = m.getZoom() >= zoom3d.current + 0.5, cap = close ? 40 : W > 800 ? 8 : 0;      // at the opening view a desktop shows the few biggest; a phone waits until you zoom in
+      if (!cap) return;
       for (const q of [...colsRef.current].sort((a, b) => Math.abs(b.v) - Math.abs(a.v))) {
-        if (kept.length >= 40) break;
+        if (kept.length >= cap) break;
         const p = m.project([q.lon, q.lat]); if (p.x < 24 || p.y < 70 || p.x > W - 24 || p.y > H - 24) continue;
         if (kept.some((k) => Math.abs(k.x - p.x) < 62 && Math.abs(k.y - p.y) < 24)) continue;
         kept.push(p);
@@ -851,7 +853,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches || readoutFor.current === `${pick.i},${pick.j}`;
     readoutFor.current = `${pick.i},${pick.j}`;
     let raf = 0;
-    if (!still) { const targets = [[bigEl, big], [subEl, sub]], t0 = performance.now(), dur = 1500;
+    if (!still) { const targets = [[bigEl, big], [subEl, sub]], t0 = performance.now(), dur = 3000;
       const tick = (now) => { const f = Math.min(1, (now - t0) / dur);
         for (const [node, text] of targets) { const done = Math.floor(f * text.length); let out = text.slice(0, done);
           for (let k = done; k < text.length; k++) out += text[k] === " " ? " " : Math.random() < 0.5 ? "0" : "1";

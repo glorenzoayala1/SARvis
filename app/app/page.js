@@ -859,7 +859,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches || readoutFor.current === `${pick.i},${pick.j}`;
     readoutFor.current = `${pick.i},${pick.j}`;
     let raf = 0;
-    if (!still) { const targets = [[bigEl, big], [subEl, sub]], t0 = performance.now(), dur = 3000;
+    if (!still) { const targets = [[bigEl, big], [subEl, sub]], t0 = performance.now(), dur = 500;
       const tick = (now) => { const f = Math.min(1, (now - t0) / dur);
         for (const [node, text] of targets) { const done = Math.floor(f * text.length); let out = text.slice(0, done);
           for (let k = done; k < text.length; k++) out += text[k] === " " ? " " : Math.random() < 0.5 ? "0" : "1";

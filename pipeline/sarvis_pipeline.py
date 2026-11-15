@@ -106,8 +106,13 @@ SITES = {
         "start": "20260801", "end": "20261101",              # only the passes around the storm
         "s1": False,                                         # OPERA DISP-S1 stops around March 2026 here
         "event": {"name": "Hurricane Isaias", "utc": "20261010", "when": "evening of 9 October 2026 (local time)",
-                  "note": "Landfall near Destin with 105 mph sustained winds. Preliminary National Hurricane Center "
-                          "figures as reported by Econews on 2 Nov 2026; the final storm report is not out yet."},
+                  "note": "Landfall near Destin at about 8:30 pm local time on 9 October 2026 as a Category 2 hurricane with "
+                          "105 mph winds, as reported by NBC News and AccuWeather from National Hurricane Center advisories. "
+                          "These are figures from the time, not the final storm report."},
+        # What the first real run showed (5 pairs per track), written by hand from the numbers, shown in the tour:
+        "finding": "Both viewing directions lost signal in the storm pass: the scene average fell from about 0.25 to 0.16 in one "
+                   "and from 0.37 to 0.23 in the other. They disagree on where. Only one direction shows strong change on the "
+                   "barrier island, so this map keeps the smaller of the two readings.",
     },
 }
 FIRST_RUN = False        # True = quick gate run: Central Valley, 3 pairs, no Sentinel-1. False = full run of SITE below.

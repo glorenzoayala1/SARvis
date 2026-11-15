@@ -266,7 +266,7 @@ export default function Page() {
     if (layer.static) for (let p = 0; p < N; p++) vals[p] = layer.palette === "impact" ? (grid[p] === layer.nodata ? NaN : grid[p] / layer.max) : grid[p] / 255;
     else for (let p = 0; p < N; p++) { const v = valueAt(grid, layer, t, p); vals[p] = v === null ? NaN : v / lim; }
     const color = layer.static
-      ? (layer.palette === "impact" ? (v) => [...ramp(RAMP.impact, v), Math.min(235, 255 * Math.max(0, v - 0.06) * 1.7)] : (v) => [...ramp(RAMP.coh, v), 215])
+      ? (layer.palette === "impact" ? (v) => { const q = Math.min(1, v / IMPACT_TOP); return [...ramp(RAMP.impact, q), Math.min(235, 255 * Math.max(0, q - 0.06) * 1.7)]; } : (v) => [...ramp(RAMP.coh, v), 215])
       : (v) => { const m = Math.min(1, Math.abs(v)); return [...ramp(v < 0 ? RAMP.neg : RAMP.pos, m), Math.min(232, 255 * Math.max(0, m - 0.1) * 2.3)]; };
     drawField(c, vals, nx, ny, color, layer.static || !opt.contours ? 0 : contourStep / lim, opt.smooth);
     if (map.current.getLayer("sar")) { map.current.setPaintProperty("sar", "raster-resampling", opt.smooth ? "linear" : "nearest"); map.current.setPaintProperty("sar", "raster-opacity", opt.strength); }
@@ -407,7 +407,7 @@ export default function Page() {
       { title: "The most changed spot", layer: main, pick: "hot", point: "hot", label: "Most changed", glow: "pickcard",
         say: (d) => d.hot ? `Here the radar lost ${Math.round(100 * d.hot.v)}% of its usual signal. In the chart, the lines stay level through the calm passes, then drop at the yellow storm line.` : "Finding the most changed spot…" },
       { title: "Line it up with the weather", layer: main, pick: "hot", point: "hot", label: "Same spot", glow: "weather",
-        say: (d) => `The rain and wind charts carry the same yellow line. ${d.share !== null ? `Across the yellow box, ${Math.round(100 * d.share)}% of the ground changed by more than 30%. ` : ""}Pink means changed, not destroyed: tides and wet soil count too.` },
+        say: (d) => `The rain and wind charts carry the same yellow line. ${d.share !== null ? `Across the yellow box, ${Math.round(100 * d.share)}% of the ground changed by more than 30%. ` : ""}${meta.finding ? `${meta.finding} ` : ""}Pink means changed, not destroyed: tides and wet soil count too.` },
     ];
     return [
       { title: "Watch it move", layer: "up", mode: "total", play: true, glow: "timebar", tab: "about",
@@ -516,6 +516,7 @@ export default function Page() {
   const TERRAIN_X = 1.5;
 const CLOUD_BASE_M = 1000;    // lowest cloud layer height above sea level, before the same vertical stretch as the land. Illustrative, not measured:
                               // the layer is raised when needed so it stays above the default 3D camera.
+const IMPACT_TOP = 0.5;      // storm-change colour is full strength where the radar lost half its usual signal or more
 const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wind speed, so the movement is visible
   const mPerCm = useMemo(() => {
     if (!meta || !layer || layer.static) return 0;
@@ -543,7 +544,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       const v = sum / cnt, k = layer.static ? v : v / lim; if (Math.abs(k) < 0.15) continue;          // leave out near-zero noise
       const cx = w + (i + B / 2) * dx, cy = n - (j + B / 2) * dy, hw = B * dx * 0.06, hh = B * dy * 0.06;   // thin: about an eighth of the block
       cols.push({ lon: cx, lat: cy, hw, hh, h: layer.static ? Math.min(1, v) * impactTop : Math.abs(v) * mPerCm,
-        c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, Math.abs(k)))})` });
+        c: `rgb(${ramp(layer.static ? RAMP.impact : k < 0 ? RAMP.neg : RAMP.pos, Math.min(1, Math.abs(k) / (layer.static ? IMPACT_TOP : 1)))})` });
     }
     // the map itself lifts each column onto the terrain, so heights here are measured from the ground
     fc.features = cols.map((q) => ({ type: "Feature", properties: { b: 0, h: q.h, c: q.c }, geometry: { type: "Polygon", coordinates: [[[q.lon - q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat + q.hh], [q.lon + q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat - q.hh], [q.lon - q.hw, q.lat + q.hh]]] } }));
@@ -767,7 +768,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             </>) : isImpact ? (<>
               <div className="trow one"><div className="tdate"><span className="muted">before and after</span><b>{meta.event?.name || "Event"}</b></div></div>
               <div className="ramp" style={{ background: `linear-gradient(90deg, rgba(246,200,216,0.08), ${css(RAMP.impact)})` }} />
-              <div className="row"><span>surface unchanged</span><span className="blank">see-through = no reading</span><span>surface changed a lot</span></div>
+              <div className="row"><span>no change</span><span className="blank">see-through = no reading</span><span>lost {Math.round(100 * IMPACT_TOP)}% of signal or more</span></div>
             </>) : (<>
               <div className="ramp" style={{ background: "linear-gradient(90deg, rgb(20,24,32), rgb(150,200,255))" }} />
               <div className="row"><span>0 signal lost</span><span>1 stable signal</span></div>
@@ -868,7 +869,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
                 <button className={sliceDir === "we" ? "on" : ""} aria-pressed={sliceDir === "we"} onClick={() => setSliceDir("we")}>West to east</button>
               </div>
               {!slice ? <p className="muted">Loading terrain…</p> : slice.error ? <p className="muted">Terrain heights could not be loaded.</p>
-                : <SliceChart slice={slice} color={layer.static ? (v) => `rgb(${ramp(RAMP.impact, v)})` : (v) => colorCss(v / lim)} unit={layer.static ? "" : unit} k={layer.static ? 1 : uf} isShare={!!layer.static} />}
+                : <SliceChart slice={slice} color={layer.static ? (v) => `rgb(${ramp(RAMP.impact, Math.min(1, v / IMPACT_TOP))})` : (v) => colorCss(v / lim)} unit={layer.static ? "" : unit} k={layer.static ? 1 : uf} isShare={!!layer.static} />}
             </div>
           )}
             </div>
@@ -899,6 +900,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
               )}
               <Bars pts={wind.pts} x0={wind.x0} x1={wind.x1} markX={layer.static ? null : toDay(layer.dates[t])} eventX={eventX} unit="m/s" label="Daily peak wind" />
               <p className="muted" style={{ margin: "6px 0 0" }}>{ctx.wind.source}</p>
+              {meta.event && <p className="muted" style={{ margin: "6px 0 0" }}>These wind figures come from a global weather model that averages over an area roughly 50 km across, so they show when the storm passed, not how hard it blew at the coast. {meta.event.note}</p>}
             </div>
           )}
           </div>

@@ -87,6 +87,7 @@ out = {"generated": dt.date.today().isoformat(), "sites": {}}
 for site in json.load(open(f"{root}/index.json")):
     folder = f"{root}/{site}"; meta = json.load(open(f"{folder}/meta.json")); ctx = json.load(open(f"{folder}/context.json"))
     if meta.get("synthetic"): continue                                   # never state findings from demo data
+    if meta.get("first_look"): continue                                  # first-look places are shown on the map but are not conclusions
     if not meta.get("event"):
         n, big, note, points, fast, slow = motion_site(folder, meta, ctx)
         if meta.get("tied_to"):

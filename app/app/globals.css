@@ -408,3 +408,6 @@ button.brandchip { transition: background .15s, transform .12s; } button.brandch
 @keyframes gold-shine { 0% { left: -80%; } 45%, 100% { left: 140%; } }
 @media (prefers-reduced-motion: reduce) { .tabs button.gold::before { display: none; } }
 @media (max-width: 560px) { .tabs button.gold { margin: 6px 2px 6px 4px; padding-left: 8px; padding-right: 8px; } }
+
+.demochip.look { background: rgba(22,32,48,0.94); border-color: #3b6fb5; color: #cfe1fb; }
+@media (max-width: 800px) { .demochip.look { top: 62px; max-width: 92vw; text-align: center; } }

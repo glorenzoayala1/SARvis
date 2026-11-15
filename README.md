@@ -73,3 +73,7 @@ that folder are real. Replace the folder contents with pipeline output.
 ## Findings
 
 The Findings tab is generated, not written by hand. `python pipeline/findings.py app/public/data` reads each site's data and writes `app/public/data/findings.json` with every number, date and sentence the tab shows. Re-run it after any site's data changes.
+
+## First-look places
+
+Semarang (Indonesia) and Campi Flegrei (Italy) are in the app with a "First look" label: about four months of NISAR data, no GPS check, no second radar, and they are left out of the Findings tab. Four other places were run on 2026-11-15 and left out because the result did not hold up: Bangkok and Lagos (the two viewing directions do not agree, correlation about 0), Jakarta (weak agreement, 0.30) and Ho Chi Minh City (a scene-wide tilt that looks like an artefact).

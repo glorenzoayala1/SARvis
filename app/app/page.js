@@ -197,6 +197,10 @@ export default function Page() {
       } catch (e) { console.warn("globe view unavailable", e); }
       if (m.getSource("sat")) return;
       top.current = m.getStyle().layers.find((l) => l.type === "symbol")?.id;      // keep place names above everything we add
+      // Worldwide satellite picture underneath (10 m Sentinel-2). The sharper USGS imagery only covers the United States and sits on top of it there.
+      m.addSource("world", { type: "raster", tiles: ["https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg"], tileSize: 256, maxzoom: 14,
+        attribution: "Sentinel-2 cloudless by EOX (contains modified Copernicus Sentinel data 2016)" });
+      m.addLayer({ id: "base-world", type: "raster", source: "world", minzoom: 6, paint: { "raster-brightness-max": 0.96, "raster-saturation": 0.1, "raster-contrast": 0.1, "raster-opacity": 0, "raster-opacity-transition": { duration: 900, delay: 0 } } }, top.current);
       m.addSource("sat", { type: "raster", tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 16, attribution: "Imagery: USGS The National Map" });
       m.addLayer({ id: "base-sat", type: "raster", source: "sat", paint: { "raster-brightness-max": 0.96, "raster-saturation": 0.08, "raster-contrast": 0.1, "raster-opacity": 0, "raster-opacity-transition": { duration: 900, delay: 0 } } }, top.current);
       // Shaded relief worked out from the elevation data: sunlit and shadowed slopes give the land its shape.
@@ -332,7 +336,8 @@ export default function Page() {
 
   useEffect(() => {
     if (!ready || !map.current) return;
-    map.current.setPaintProperty("base-sat", "raster-opacity", base === "sat" ? 1 : 0);        // cross-fades between the two backgrounds
+    map.current.setPaintProperty("base-sat", "raster-opacity", base === "sat" ? 1 : 0);
+    if (map.current.getLayer("base-world")) map.current.setPaintProperty("base-world", "raster-opacity", base === "sat" ? 1 : 0);        // cross-fades between the two backgrounds
     roads.current.forEach((id) => { try { map.current.setPaintProperty(id, "line-color", base === "sat" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.12)"); } catch {} });
     blds.current.forEach((id) => { try { map.current.setLayoutProperty(id, "visibility", base === "sat" ? "none" : "visible"); } catch {} });
     // The imagery stops a little way offshore and far inland tiles arrive late. Under the satellite view, colour the street map's own
@@ -993,7 +998,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
               <button className={opt.view3d ? "on" : ""} aria-pressed={opt.view3d} disabled={!bars3d} onClick={() => { setTour(null); set({ view3d: true }); }}>3D</button>
             </div>)}
           {meta && layer && <button className="ghost wide" onClick={() => { setTour(null); setTab("found"); setSheet("full"); }}>What we found</button>}
-          {meta && layer && <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Tour</button>}
+          {meta && layer && !meta.first_look && <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Tour</button>}
           <button className="ghost" aria-expanded={showSettings} onClick={() => setShowSettings(true)}>Settings</button>
         </div>
       </div>
@@ -1013,6 +1018,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             <div className="keyends num"><span>0</span><span>1</span></div>
           </>)}
         </div>)}
+      {meta?.first_look && !step && <div className="demochip look"><b>First look.</b> About four months of NISAR data, not checked against ground measurements.</div>}
       {meta?.synthetic && <div className="demochip"><b>Demo data.</b> Radar layers are synthetic.</div>}
       {meta && layer && !pick && grid && !step && sheet === "peek" && <div className="hint">Tap the map to read one spot</div>}
       {showSettings && (

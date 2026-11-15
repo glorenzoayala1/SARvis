@@ -342,3 +342,23 @@ button.brandchip { color: var(--ink); font-weight: 600; cursor: pointer; gap: 8p
 
 .readout-at { z-index: 5; }
 .readout { position: relative; }
+
+/* stars around the globe when zoomed all the way out */
+.stars { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity .3s;
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--r, 200px), #000 calc(var(--r, 200px) + 10px)); mask-image: radial-gradient(circle at 50% 50%, transparent var(--r, 200px), #000 calc(var(--r, 200px) + 10px));
+  background-image:
+  radial-gradient(1.2px 1.2px at 12% 18%, #fff, transparent 70%), radial-gradient(1px 1px at 27% 64%, #dfe8ff, transparent 70%), radial-gradient(1.6px 1.6px at 41% 9%, #fff, transparent 70%),
+  radial-gradient(1px 1px at 58% 77%, #fff, transparent 70%), radial-gradient(1.4px 1.4px at 73% 31%, #ffeedd, transparent 70%), radial-gradient(1px 1px at 88% 58%, #fff, transparent 70%),
+  radial-gradient(1px 1px at 6% 83%, #cfdcff, transparent 70%), radial-gradient(1.5px 1.5px at 94% 12%, #fff, transparent 70%), radial-gradient(1px 1px at 49% 46%, #fff, transparent 70%),
+  radial-gradient(1px 1px at 35% 91%, #fff, transparent 70%), radial-gradient(1.1px 1.1px at 66% 5%, #dfe8ff, transparent 70%), radial-gradient(1px 1px at 81% 88%, #fff, transparent 70%);
+  background-size: 310px 290px, 370px 410px, 290px 330px, 430px 350px, 330px 390px, 390px 310px, 350px 430px, 410px 370px, 270px 350px, 450px 330px, 310px 450px, 370px 290px; }
+
+/* place pins, shown only when zoomed out */
+.sitepin { display: none; flex-direction: column; align-items: center; gap: 3px; background: none; border: 0; padding: 0; cursor: pointer; font: 600 12.5px system-ui, sans-serif; color: #fff; }
+.far .sitepin { display: flex; }
+.sitepin span { background: rgba(14,17,22,0.88); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 10px; white-space: nowrap; order: -1; box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+.sitepin i { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(237,161,0,0.6); animation: pinpulse 2s ease-out infinite; }
+.sitepin:hover span { background: var(--accent); color: #16191d; }
+@keyframes pinpulse { to { box-shadow: 0 0 0 14px rgba(237,161,0,0); } }
+@media (prefers-reduced-motion: reduce) { .sitepin i { animation: none; } }
+.far .station, .far .vlabel, .far .hint, .far .readout-at { display: none; }

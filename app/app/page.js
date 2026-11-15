@@ -85,7 +85,7 @@ export default function Page() {
       const ms = await Promise.all(ids.map((id) => fetch(`data/${id}/meta.json`).then((r) => r.json()).catch(() => ({ id }))));
       const h = Object.fromEntries(new URLSearchParams(window.location.hash.slice(1)));
       want.current = h;
-      setSites(ms.map((m, k) => ({ id: ids[k], short: m.short, emoji: m.emoji }))); setSiteId(ids.includes(h.site) ? h.site : ids[0]);
+      setSites(ms.map((m, k) => ({ id: ids[k], short: m.short, emoji: m.emoji, lon: ((m.focus_box || m.bbox)[0] + (m.focus_box || m.bbox)[2]) / 2, lat: ((m.focus_box || m.bbox)[1] + (m.focus_box || m.bbox)[3]) / 2 }))); setSiteId(ids.includes(h.site) ? h.site : ids[0]);
       if (h.mode === "speed") setMode("speed");
     });
   }, []);
@@ -102,6 +102,9 @@ export default function Page() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [sheet, setSheet] = useState("peek");   // footer height: peek, half or full
   const [dragH, setDragH] = useState(null);
+  const [landTick, setLandTick] = useState(0);
+  const optRef = useRef(null); optRef.current = opt;
+  const starsEl = useRef(null);
   const readoutFor = useRef("");
   const [siteMenu, setSiteMenu] = useState(false);
   // every sentence in the Findings tab is worked out from the data by pipeline/findings.py
@@ -157,7 +160,7 @@ export default function Page() {
     map.current = new maplibregl.Map({
       container: mapDiv.current,
       style: "https://tiles.openfreemap.org/styles/dark",      // free vector map, no key (OpenFreeMap / OpenStreetMap)
-      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 84,
+      center: [-118.37, 33.75], zoom: 11, attributionControl: false, dragRotate: false, maxPitch: 84, minZoom: 1.3,
     });
     map.current.touchZoomRotate.disableRotation();
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
@@ -165,6 +168,16 @@ export default function Page() {
     const m = map.current;
     if (typeof window !== "undefined") window.__sarvisMap = m;      // handy for debugging in the console
     const setup = () => {
+      // Zoom all the way out and the map becomes the Earth in space, with that day's real cloud from NASA's VIIRS satellite image.
+      try {
+        m.setProjection({ type: ["interpolate", ["linear"], ["zoom"], 5.5, "vertical-perspective", GLOBE_ABOVE, "mercator"] });
+        m.setSky({ "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0] });
+        if (!m.getSource("earth")) {
+          m.addSource("earth", { type: "raster", tileSize: 256, maxzoom: 8, attribution: "NASA GIBS / VIIRS",
+            tiles: [`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/${EARTH_DAY}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`] });
+          m.addLayer({ id: "earth", type: "raster", source: "earth", maxzoom: 7.5, paint: { "raster-opacity": ["interpolate", ["linear"], ["zoom"], 5, 1, 7.5, 0], "raster-fade-duration": 0 } });
+        }
+      } catch (e) { console.warn("globe view unavailable", e); }
       if (m.getSource("sat")) return;
       top.current = m.getStyle().layers.find((l) => l.type === "symbol")?.id;      // keep place names above everything we add
       m.addSource("sat", { type: "raster", tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 16, attribution: "Imagery: USGS The National Map" });
@@ -274,14 +287,14 @@ export default function Page() {
       ? (layer.palette === "impact" ? (v) => { const q = Math.min(1, v / IMPACT_TOP); return [...ramp(RAMP.impact, q), Math.min(235, 255 * Math.max(0, q - 0.06) * 1.7)]; } : (v) => [...ramp(RAMP.coh, v), 215])
       : (v) => { const m = Math.min(1, Math.abs(v)); return [...ramp(v < 0 ? RAMP.neg : RAMP.pos, m), Math.min(232, 255 * Math.max(0, m - 0.1) * 2.3)]; };
     drawField(c, vals, nx, ny, color, layer.static || !opt.contours ? 0 : contourStep / lim, opt.smooth);
-    if (map.current.getLayer("sar")) { map.current.setPaintProperty("sar", "raster-resampling", opt.smooth ? "linear" : "nearest"); map.current.setPaintProperty("sar", "raster-opacity", opt.strength); }
+    if (map.current.getLayer("sar")) { map.current.setPaintProperty("sar", "raster-resampling", opt.smooth ? "linear" : "nearest"); map.current.setPaintProperty("sar", "raster-opacity", opt.strength * riseK.current); }
     // A canvas source repaints straight from the canvas: no image decode, no aborted loads while scrubbing.
     const [w, s, e, n] = meta.bbox, coords = [[w, n], [e, n], [e, s], [w, s]], m = map.current;
     let src = m.getSource("sar");
     if (src && src._site !== meta.id) { m.removeLayer("sar"); m.removeSource("sar"); src = null; }      // canvas size changes with the site
     if (!src) {
       m.addSource("sar", { type: "canvas", canvas: c, coordinates: coords, animate: false });
-      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": opt.smooth ? "linear" : "nearest", "raster-fade-duration": 0, "raster-opacity": opt.strength, "raster-opacity-transition": { duration: 300, delay: 0 } } }, m.getLayer("boxes") ? "boxes" : top.current);
+      m.addLayer({ id: "sar", type: "raster", source: "sar", paint: { "raster-resampling": opt.smooth ? "linear" : "nearest", "raster-fade-duration": 0, "raster-opacity": opt.strength * riseK.current, "raster-opacity-transition": { duration: 300, delay: 0 } } }, m.getLayer("boxes") ? "boxes" : top.current);
       src = m.getSource("sar"); src._site = meta.id;
     }
     src.play(); src.pause(); m.triggerRepaint();
@@ -522,6 +535,8 @@ export default function Page() {
 const CLOUD_BASE_M = 1000;    // lowest cloud layer height above sea level, before the same vertical stretch as the land. Illustrative, not measured:
                               // the layer is raised when needed so it stays above the default 3D camera.
 const KEYWORD = { down: "sank", up: "rose" };
+const EARTH_DAY = "2026-10-13";   // the day of the whole-Earth satellite picture: the last radar date at Portuguese Bend
+const GLOBE_ABOVE = 8;         // below this zoom the flat map bends into a globe (fully round by zoom 5.5)
 const PEEK = 148;             // height of the footer when it is down, in pixels (matches .sheet --h in the stylesheet)
 const IMPACT_TOP = 0.5;      // storm-change colour is full strength where the radar lost half its usual signal or more
 const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wind speed, so the movement is visible
@@ -541,7 +556,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     let fc = { type: "FeatureCollection", features: [] }, live = true;
     const push = () => { if (!live) return; if (m.getSource("bars")) m.getSource("bars").setData(fc);
       else { m.addSource("bars", { type: "geojson", data: fc });
-        m.addLayer({ id: "bars", type: "fill-extrusion", source: "bars", paint: { "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": true } }, top.current); } };
+        m.addLayer({ id: "bars", type: "fill-extrusion", source: "bars", paint: { "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["*", ["get", "h"], riseK.current], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": true } }, top.current); } };
     if (!on) { colsRef.current = []; setColsVer((v) => v + 1); push(); return; }
     const [w, s, e, n] = meta.bbox, { nx, ny } = meta, B = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / 800)));       // about 800 blocks at most, so the land stays visible between columns
     const widthM = (e - w) * 111320 * Math.cos((((s + n) / 2) * Math.PI) / 180), impactTop = widthM * 0.018 * { low: 0.5, medium: 1, high: 2 }[opt.tall];
@@ -586,6 +601,23 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     draw(); m.on("moveend", draw);
     return () => { m.off("moveend", draw); clear(); };
   }, [ready, opt.view3d, opt.labels, colsVer, cam3d]);
+  // Arriving at a place: the colours and columns are held back while the camera travels, then the colour washes in and the columns rise.
+  const riseK = useRef(1), riseRaf = useRef(0);
+  const setRise = (m, k) => { riseK.current = k;
+    if (m.getLayer("bars")) m.setPaintProperty("bars", "fill-extrusion-height", ["*", ["get", "h"], k]);
+    if (m.getLayer("sar")) m.setPaintProperty("sar", "raster-opacity", optRef.current.strength * k, { validate: false }); };
+  const arrive = (m) => { cancelAnimationFrame(riseRaf.current); setRise(m, 0);
+    const start = () => { const t0 = performance.now(), step = (now) => { const f = Math.min(1, (now - t0) / 1700), k = 1 - (1 - f) ** 3; setRise(m, k); if (f < 1) riseRaf.current = requestAnimationFrame(step); }; riseRaf.current = requestAnimationFrame(step); };
+    setTimeout(() => m.once("moveend", start), 60); };
+  // A pin for each place, shown when you are zoomed out. Press one to fly down to it.
+  const pins = useRef([]);
+  useEffect(() => {
+    const m = map.current; pins.current.forEach((k) => k.remove()); pins.current = [];
+    if (!m || !ready) return;
+    sites.forEach((st) => { const el = document.createElement("button"); el.className = "sitepin" + (st.id === siteId ? " here" : ""); el.innerHTML = "<i></i><span></span>"; el.lastChild.textContent = st.short || st.id;
+      el.onclick = (e) => { e.stopPropagation(); setTour(null); setPick(null); setSheet("peek"); if (st.id === siteId) setLandTick((v) => v + 1); else setSiteId(st.id); };
+      pins.current.push(new maplibregl.Marker({ element: el, anchor: "bottom" }).setLngLat([st.lon, st.lat]).addTo(m)); });
+  }, [ready, sites, siteId]);
   useEffect(() => {            // tilt into the terrain and move in close on the focus area; flatten on the way out
     const m = map.current; if (!m || !ready || !meta) return;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -598,12 +630,17 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       // how high the camera ends up in this view (metres): the cloud layer is kept above it, so you look along its underside
       camAlt3d.current = Math.cos((77 * Math.PI) / 180) * ((m.getContainer().clientHeight / 2) / Math.tan((36.87 / 2) * Math.PI / 180)) * ((40075016.686 * Math.cos((latc * Math.PI) / 180)) / (512 * 2 ** z3)) + 400;
       zoom3d.current = z3; setCam3d(camAlt3d.current);
-      m.easeTo({ center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: -18, duration: calm ? 0 : 1800, essential: true });
+      const far = m.getZoom() < 9, to = { center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: -18, essential: true };
+      try { m.setMaxPitch(84); } catch (e) {}
+      if (!calm) arrive(m);
+      if (far && !calm) m.flyTo({ ...to, duration: 5200, curve: 1.3 }); else m.easeTo({ ...to, duration: calm ? 0 : 1800 });
     } else {
       m.dragRotate.disable(); m.touchZoomRotate.disableRotation(); m.setTerrain(null);
-      m.easeTo({ pitch: 0, bearing: 0, duration: calm ? 0 : 900, essential: true }); setTimeout(() => fitSite(calm ? 0 : 900), calm ? 0 : 950);
+      const far = m.getZoom() < 9;
+      if (far && !calm) { arrive(m); fitSite(4800); }
+      else { m.easeTo({ pitch: 0, bearing: 0, duration: calm ? 0 : 900, essential: true }); setTimeout(() => fitSite(calm ? 0 : 900), calm ? 0 : 950); }
     }
-  }, [opt.view3d, ready, meta?.id]);
+  }, [opt.view3d, ready, meta?.id, landTick]);
   // Clouds in 3D: how many depends on NASA's daily cloud cover for the selected date. Sizes and heights are set
   // relative to the site (bases about 260 to 600 m up, a low marine-layer height that stays below the close camera, stretched like the land), so they sit in scale with the terrain.
   const cloudPct = useMemo(() => {
@@ -663,8 +700,10 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         this.pr = pr; this.buf = gl.createBuffer(); this.vao = gl.createVertexArray ? gl.createVertexArray() : null;   // our own vertex state, so the map's layers are left untouched
         this.loc = { pos: gl.getAttribLocation(pr, "a_pos"), km: gl.getAttribLocation(pr, "a_km"), m: gl.getUniformLocation(pr, "u_m"), off: gl.getUniformLocation(pr, "u_off"), cover: gl.getUniformLocation(pr, "u_cover"), below: gl.getUniformLocation(pr, "u_below"), ground: gl.getUniformLocation(pr, "u_ground"), cam: gl.getUniformLocation(pr, "u_cam"), ctr: gl.getUniformLocation(pr, "u_ctr"), reach: gl.getUniformLocation(pr, "u_reach") };
       },
-      render(gl, mx) {
+      render(gl, args) {
         const d = cloudData.current, L = this.loc, mm = map.current; if (!d.on || !mm) return;
+        if (mm.getZoom() < GLOBE_ABOVE + 0.2) return;                   // zoomed out, the map is a globe and has its own sky
+        const mx = args?.defaultProjectionData?.mainMatrix || args?.modelViewProjectionMatrix || args;
         const c = maplibregl.MercatorCoordinate.fromLngLat([d.lon0, d.lat0], d.alt), u = c.meterInMercatorCoordinateUnits() * 1000;
         // is the camera under the layer (look along its underside) or over it (look down through it)?
         const tr = mm.transform, ppm = (512 * 2 ** mm.getZoom()) / (40075016.686 * Math.cos((mm.getCenter().lat * Math.PI) / 180));      // screen pixels per metre at the map centre
@@ -700,12 +739,26 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t, ctx, cam3d]);
   useEffect(() => { if (tour && opt.view3d) set({ view3d: false }); }, [tour]);
 
+  // Zoomed far out: stars appear around the Earth, and the camera levels off so the globe sits in the middle of the screen.
+  useEffect(() => {
+    const m = map.current; if (!m || !ready) return;
+    const onZoom = () => { const z = m.getZoom(), el = starsEl.current;
+      try { m.setMaxPitch(z < 4.5 ? 0 : z < GLOBE_ABOVE ? ((z - 4.5) / (GLOBE_ABOVE - 4.5)) * 84 : 84); } catch (e) {}
+      m.getContainer().closest(".stage")?.classList.toggle("far", z < 9);
+      if (el) { const R = (512 * 2 ** z) / (2 * Math.PI);              // the globe's radius on screen, in pixels
+        el.style.opacity = Math.max(0, Math.min(1, (5.5 - z) / 1.5));
+        el.style.setProperty("--r", `${Math.round(R + 14)}px`); } };
+    const onEnd = () => { if (opt.view3d && bars3d && !tour && m.getZoom() >= GLOBE_ABOVE && m.getPitch() < 60 && !m.isMoving()) m.easeTo({ pitch: 77, duration: 900 }); };
+    m.on("zoom", onZoom); m.on("zoomend", onEnd); onZoom();
+    return () => { m.off("zoom", onZoom); m.off("zoomend", onEnd); };
+  }, [ready, opt.view3d, bars3d, tour]);
+
   // In 3D the camera slowly circles the place. Touching the map pauses it; it picks up again a few seconds after you let go.
   useEffect(() => {
     const m = map.current; if (!m || !ready || !opt.view3d || !opt.orbit || tour || showSettings) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let timer = 0, held = false, live = true;
-    const go = () => { if (!live || held) return; m.easeTo({ bearing: m.getBearing() + 120, duration: 60000, easing: (x) => x }, { orbit: true }); };      // 2 degrees a second
+    const go = () => { if (!live || held) return; if (m.getZoom() < GLOBE_ABOVE) { later(4000); return; } m.easeTo({ bearing: m.getBearing() + 120, duration: 60000, easing: (x) => x }, { orbit: true }); };      // 2 degrees a second
     const later = (ms) => { clearTimeout(timer); timer = setTimeout(go, ms); };
     const hold = () => { held = true; clearTimeout(timer); }, release = () => { held = false; later(5000); };
     const onEnd = (e) => { if (held) return; if (e.orbit) go(); else later(4000); };
@@ -820,6 +873,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
   return (
     <div className="stage" style={{ "--sheet-h": dragH !== null ? `${dragH}px` : sheet === "peek" ? `${PEEK}px` : sheet === "half" ? "52dvh" : "88dvh" }} onClick={(e) => { if (siteMenu && !e.target.closest(".sitepick")) setSiteMenu(false); }}>
       <div className="map"><div ref={mapDiv} /></div>
+      <div className="stars" ref={starsEl} aria-hidden="true" />
       <div className="topbar">
         <div className="sitepick">
           <button className="brandchip" aria-haspopup="listbox" aria-expanded={siteMenu} onClick={() => setSiteMenu((v) => !v)}>{meta ? meta.short : "Loading"}<span className="caret" aria-hidden="true" /></button>

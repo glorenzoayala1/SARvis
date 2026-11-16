@@ -494,7 +494,11 @@ export default function Page() {
     const [w, s, e, n] = meta.bbox, phone = window.innerWidth <= 800;
     map.current.fitBounds([[w, s], [e, n]], { padding: { top: 64, bottom: 196, left: phone ? 16 : 40, right: phone ? 16 : 40 }, duration, essential: true });
   };
-  const tourMark = useRef(null), wasTouring = useRef(false);
+  const tourMark = useRef(null), wasTouring = useRef(false), home3d = useRef(null);
+  // Camera moves for the demo work in whichever view you are in. In 3D they keep the tilt and the direction you are facing.
+  const NOPAD = { top: 0, bottom: 0, left: 0, right: 0 };
+  const goHome = (dur, pad = NOPAD) => { const m = map.current; if (!m) return;
+    if (optRef.current.view3d && home3d.current) m.easeTo({ ...home3d.current, pitch: 77, padding: pad, duration: dur, essential: true }); else fitSite(dur); };
   useEffect(() => {
     if (!step || !meta || !layer) return;
     if (layer.key !== step.layer && meta.layers.find((l) => l.key === step.layer)) { setPlaying(false); setLayerKey(step.layer); return; }
@@ -517,9 +521,10 @@ export default function Page() {
   useEffect(() => {
     tourMark.current?.remove(); tourMark.current = null;
     document.querySelectorAll(".spot").forEach((el) => el.classList.remove("spot"));
-    if (!step || !meta || !map.current || !ready) { if (wasTouring.current) { wasTouring.current = false; fitSite(900); } return; }
+    if (!step || !meta || !map.current || !ready) { if (wasTouring.current) { wasTouring.current = false; goHome(900); } return; }
     wasTouring.current = true;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches, dur = calm ? 0 : 1300;
+    const in3d = opt.view3d && !!home3d.current, pad3 = { top: 40, bottom: Math.round(map.current.getContainer().clientHeight * 0.4), left: 0, right: 0 };      // keep the subject above the open footer
     let at = null;
     if (step.point === "hot" && hot) at = [hot.lon, hot.lat];
     else if (step.point === "station" && step.station) at = [step.station.lon, step.station.lat];
@@ -529,16 +534,17 @@ export default function Page() {
       el.innerHTML = `<div class="tourmark"><span></span><svg viewBox="0 0 24 30" width="26" height="32" aria-hidden="true"><path d="M12 29 L2 15 H8.5 V1 H15.5 V15 H22 Z" fill="#eda100" stroke="#1a1a19" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`;
       el.querySelector("span").textContent = step.label || "";
       tourMark.current = new maplibregl.Marker({ element: el, anchor: "bottom", offset: [0, step.point === "box" ? 0 : -14] }).setLngLat(at).addTo(map.current);
-      if (step.point === "box") fitSite(dur);
+      if (step.point === "box") goHome(dur, pad3);
+      else if (in3d) map.current.easeTo({ center: at, zoom: Math.min(home3d.current.zoom + 0.5, 16), pitch: 77, padding: pad3, duration: dur, essential: true });
       else { const z = map.current.cameraForBounds([[meta.bbox[0], meta.bbox[1]], [meta.bbox[2], meta.bbox[3]]])?.zoom ?? map.current.getZoom(); map.current.easeTo({ center: at, zoom: Math.min(z + 0.6, 15), duration: dur, padding: { bottom: 110, top: 30, left: 0, right: 0 }, essential: true }); }
-    } else fitSite(dur);
+    } else goHome(dur, pad3);
     const t1 = step.glow && setTimeout(() => {
       const card = document.getElementById(step.glow); if (!card) return;
       card.classList.add("spot");
       if (step.glow !== "timebar") card.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "nearest" });
     }, 650);
     return () => clearTimeout(t1);
-  }, [tour?.i, step, ready, hot?.i, hot?.j, layerKey]);
+  }, [tour?.i, step, ready, hot?.i, hot?.j, layerKey, opt.view3d]);
   useEffect(() => {
     if (!tour?.auto) return;
     const id = setTimeout(() => setTour((v) => (v && v.i < steps.length - 1 ? { ...v, i: v.i + 1 } : null)), 7000);
@@ -642,7 +648,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     const m = map.current; if (!m || !ready) return;
     const clear = () => { colMarks.current.forEach((k) => k.remove()); colMarks.current = []; };
     const draw = () => { clear();
-      if (!opt.view3d || !opt.labels || !colsRef.current.length || !zoom3d.current) return;
+      if (!opt.view3d || !opt.labels || !colsRef.current.length || !zoom3d.current || tour) return;      // the demo's own pointer does the talking
       const W = m.getContainer().clientWidth, H = m.getContainer().clientHeight, kept = [];
       const close = m.getZoom() >= zoom3d.current + 0.5, cap = close ? 40 : W > 800 ? 8 : 0;      // at the opening view a desktop shows the few biggest; a phone waits until you zoom in
       if (!cap) return;
@@ -656,7 +662,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       } };
     draw(); m.on("moveend", draw);
     return () => { m.off("moveend", draw); clear(); };
-  }, [ready, opt.view3d, opt.labels, colsVer, cam3d]);
+  }, [ready, opt.view3d, opt.labels, colsVer, cam3d, !!tour]);
   // Some places need their own background picture (at Destin the public aerial imagery is blacked out over a military base).
   useEffect(() => {
     const m = map.current; if (!m || !ready || !meta) return;
@@ -710,7 +716,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       const z3 = Math.min((cam?.zoom ?? 12) + 0.35, 15.5), latc = (f[1] + f[3]) / 2;
       // how high the camera ends up in this view (metres): the cloud layer is kept above it, so you look along its underside
       camAlt3d.current = Math.cos((77 * Math.PI) / 180) * ((m.getContainer().clientHeight / 2) / Math.tan((36.87 / 2) * Math.PI / 180)) * ((40075016.686 * Math.cos((latc * Math.PI) / 180)) / (512 * 2 ** z3)) + 400;
-      zoom3d.current = z3; setCam3d(camAlt3d.current);
+      zoom3d.current = z3; home3d.current = { center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3 }; setCam3d(camAlt3d.current);
       const here = m.getCenter(), tc = cam?.center || { lng: (f[0] + f[2]) / 2, lat: (f[1] + f[3]) / 2 }, tl = tc.lng ?? tc[0], tt = tc.lat ?? tc[1];
       const hop = Math.hypot((here.lng - tl) * Math.cos((tt * Math.PI) / 180), here.lat - tt) > 0.8;            // the new place is far away: rise up, cross over, come down
       const far = m.getZoom() < 9 || hop, to = { center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: -18, essential: true };
@@ -817,7 +823,6 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [ready, opt.view3d, opt.clouds, meta, cloudPct, t, ctx, cam3d]);
-  useEffect(() => { if (tour && opt.view3d) set({ view3d: false }); }, [tour]);
 
   // Zoomed far out: stars appear around the Earth, and the camera levels off so the globe sits in the middle of the screen.
   useEffect(() => {
@@ -998,10 +1003,10 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
           {meta && layer && (
             <div className="seg dim" aria-label="Flat map or 3D">
               <button className={!opt.view3d ? "on" : ""} aria-pressed={!opt.view3d} onClick={() => set({ view3d: false })}>2D</button>
-              <button className={opt.view3d ? "on" : ""} aria-pressed={opt.view3d} disabled={!bars3d} onClick={() => { setTour(null); set({ view3d: true }); }}>3D</button>
+              <button className={opt.view3d ? "on" : ""} aria-pressed={opt.view3d} disabled={!bars3d} onClick={() => set({ view3d: true })}>3D</button>
             </div>)}
           {meta && layer && <button className="ghost wide" onClick={() => { setTour(null); setTab("found"); setSheet("full"); }}>What we found</button>}
-          {meta && layer && !meta.first_look && <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Tour</button>}
+          {meta && layer && !meta.first_look && <button className="cta" onClick={() => setTour({ i: 0, auto: false })}>Demo</button>}
           <button className="ghost" aria-expanded={showSettings} onClick={() => setShowSettings(true)}>Settings</button>
         </div>
       </div>

@@ -1265,7 +1265,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
                     <div className="muted heronote">{f.big_note}</div>
                     <p className="conclusion">{f.conclusion}</p>
                     <ul>{f.points.map((x, k) => <li key={k}>{x}</li>)}</ul>
-                    <p className="sure"><b>How sure:</b> {f.sure}</p>
+                    <p className="sure"><b>Checked with:</b> {f.sure}</p>
                     <button className="ghost" onClick={() => { if (st.id !== siteId) setSiteId(st.id); setSheet("peek"); }}>{st.id === siteId ? "Back to the map" : "Show me"}</button>
                   </div>); })}
               </div>

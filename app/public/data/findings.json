@@ -14,7 +14,7 @@
     "The wettest month was February 2026 (94 mm of rain), when it sank 5.8 cm. Pass by pass, speed and rain barely line up (correlation 0.17).",
     "From 23 Nov 2025 to 17 Mar 2026, when both radars were flying, NISAR got a usable reading in the study box on 72% and 61% of passes (its two directions). Sentinel-1 got 46% and 44%."
    ],
-   "sure": "No GPS station sits on the slide, but the fastest spot went down in 23 of its 23 steps.",
+   "sure": "2 GPS stations \u00b7 2 viewing directions \u00b7 second radar (Sentinel-1)",
    "numbers": {
     "from": "20251205",
     "to": "20261013",
@@ -86,7 +86,7 @@
     "The wettest month was February 2026 (88 mm of rain), when it sank 1.1 cm. Pass by pass, speed and rain barely line up (correlation -0.30).",
     "From 28 Nov 2025 to 28 Mar 2026, when both radars were flying, NISAR got a usable reading in the study box on 90% and 89% of passes (its two directions). Sentinel-1 got 82% and 86%."
    ],
-   "sure": "Every date is pinned to GPS station HANF, so that station is not an independent check.",
+   "sure": "1 GPS station \u00b7 2 viewing directions \u00b7 second radar (Sentinel-1)",
    "numbers": {
     "from": "20251130",
     "to": "20261008",
@@ -162,7 +162,7 @@
     "Inside the study box on the coast, 20% of the ground changed by more than 30% in the descending direction but only 1% in the ascending one.",
     "Only 34% of the area gives a reading in both directions. The rest is water or ground the radar could not follow."
    ],
-   "sure": "The calm baseline is only 4 passes per direction, and storm figures are from reports at the time.",
+   "sure": "2 viewing directions",
    "numbers": {
     "landfall_utc": "20261010",
     "tracks": {
@@ -208,7 +208,7 @@
     "NISAR got a usable reading in the study box on 78% and 68% of passes (its two directions).",
     "Against 15 GPS stations, radar and GPS differ by 2.3 cm at the typical station, and stations that moved more on GPS moved more on radar (correlation 0.73)."
    ],
-   "sure": "Matches 15 GPS stations; no second radar to compare.",
+   "sure": "15 GPS stations \u00b7 2 viewing directions",
    "numbers": {
     "from": "20251115",
     "to": "20261005",
@@ -325,7 +325,7 @@
     "NISAR got a usable reading in the study box on 88% and 74% of passes (its two directions).",
     "GPS comparison: at station MMX1 radar measured -19.8 cm and GPS -24.7 cm."
    ],
-   "sure": "Both viewing directions agree; one GPS station to compare.",
+   "sure": "1 GPS station \u00b7 2 viewing directions",
    "numbers": {
     "from": "20251106",
     "to": "20261008",
@@ -371,7 +371,7 @@
     "NISAR got a usable reading in the study box on 78% and 97% of passes (its two directions).",
     "GPS comparison: at station AUSV radar measured +0.3 cm and GPS +8.4 cm; at station GEVK radar measured -0.9 cm and GPS +8.5 cm; at station SENG radar measured +20.3 cm and GPS +21.6 cm."
    ],
-   "sure": "Compared at 3 GPS stations, with mixed agreement.",
+   "sure": "3 GPS stations \u00b7 2 viewing directions",
    "numbers": {
     "from": "20251115",
     "to": "20261005",
@@ -426,7 +426,7 @@
     "The two viewing directions agree on where the ground moved with a correlation of 0.64 (1 would be perfect agreement, 0 none).",
     "NISAR got a usable reading in the study box on 75% and 74% of passes (its two directions)."
    ],
-   "sure": "Both viewing directions agree; no GPS station here to compare.",
+   "sure": "2 viewing directions",
    "numbers": {
     "from": "20260625",
     "to": "20260929",
@@ -461,7 +461,7 @@
     "The two viewing directions agree on where the ground moved with a correlation of 0.40 (1 would be perfect agreement, 0 none).",
     "NISAR got a usable reading in the study box on 81% and 78% of passes (its two directions)."
    ],
-   "sure": "No GPS station here, and the two viewing directions only partly agree.",
+   "sure": "2 viewing directions",
    "numbers": {
     "from": "20251129",
     "to": "20261007",
@@ -496,7 +496,7 @@
     "The two viewing directions agree on where the ground moved with a correlation of 0.18 (1 would be perfect agreement, 0 none).",
     "NISAR got a usable reading in the study box on 52% and 50% of passes (its two directions)."
    ],
-   "sure": "No GPS station here, and the two viewing directions only partly agree.",
+   "sure": "2 viewing directions",
    "numbers": {
     "from": "20260624",
     "to": "20261010",

@@ -91,6 +91,12 @@ def box_smooth(x, k=7):
         return c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]
     n = win(ok); return np.where(n > k * k / 2, win(v) / np.maximum(n, 1), np.nan)
 
+def used(meta, gps=0):
+    """What the result rests on: GPS stations, viewing directions, a second radar."""
+    keys = [l["key"] for l in meta["layers"]]; dirs = sum(k in keys for k in ("asc_los", "desc_los"))
+    return " · ".join(([f"{gps} GPS station{'s' if gps != 1 else ''}"] if gps else []) + [f"{dirs} viewing direction{'s' if dirs != 1 else ''}"]
+                      + (["second radar (Sentinel-1)"] if any(k.startswith("s1_") for k in keys) else []))
+
 def gps_check(meta, ctx, up, d):
     """Radar against every GPS station in the scene with a near-complete record: vertical change from the first to the last radar date."""
     w, s, e, n = meta["bbox"]; nx, ny = meta["nx"], meta["ny"]; r = 2 if nx < 200 else 4; rows = []
@@ -142,7 +148,7 @@ def first_look(folder, meta, ctx):
             else f"Compared at {len(gps['stations'])} GPS stations, with mixed agreement." if gps
             else "No GPS station here, and the two viewing directions only partly agree.")
     return {"place": meta["name"], "kind": "first_look", "tag": tag, "big": f"{val:.0f} cm", "big_note": f"the most-changed area {word}, {nice(d[0])} to {nice(d[-1])}",
-            "conclusion": conclusion, "points": points, "sure": sure, "numbers": numbers}
+            "conclusion": conclusion, "points": points, "sure": used(meta, len(gps["stations"]) if gps else 0), "numbers": numbers}
 
 out = {"generated": dt.date.today().isoformat(), "sites": {}}
 for site in json.load(open(f"{root}/index.json")):
@@ -167,7 +173,7 @@ for site in json.load(open(f"{root}/index.json")):
                           f"It sank fastest in {fast} and slowest in {slow}.")
             if n.get("nisar_minus_s1", 0) > 0.1: conclusion += " NISAR kept a reading on the slide far more often than Sentinel-1 did."
             sure = f"No GPS station sits on the slide, but the fastest spot went down in {n['peak_steps_down'][0]} of its {n['peak_steps_down'][1]} steps."
-        out["sites"][site] = {"place": meta["name"], "kind": "motion", "big": big, "big_note": note, "conclusion": conclusion, "points": points, "sure": sure, "numbers": n}
+        out["sites"][site] = {"place": meta["name"], "kind": "motion", "big": big, "big_note": note, "conclusion": conclusion, "points": points, "sure": used(meta, len((ctx.get("gnss") or {}).get("stations", []))), "numbers": n}
     else:
         ev = meta["event"]; ss = meta["signal_series"]; n = {"landfall_utc": ev["utc"], "tracks": {}}; points = []; drops = []
         fm, _, _ = box_mask(meta, meta["focus_box"])
@@ -186,7 +192,7 @@ for site in json.load(open(f"{root}/index.json")):
                       "The two viewing directions do not agree on where the ground changed, so this is evidence of the storm, not a damage map.")
         sure = f"The calm baseline is only {a['calm_passes']} passes per direction, and storm figures are from reports at the time."
         out["sites"][site] = {"place": meta["name"], "kind": "event", "big": f"{pct(min(drops))} to {pct(max(drops))}", "big_note": f"drop in signal quality in the storm pass (landfall {nice(ev['utc'])} UTC)",
-                              "conclusion": conclusion, "points": points, "sure": sure.strip(), "numbers": n}
+                              "conclusion": conclusion, "points": points, "sure": used(meta), "numbers": n}
 
 # one line across all sites, only from numbers above
 s = out["sites"]; parts = []

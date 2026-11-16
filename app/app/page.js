@@ -1026,7 +1026,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             <div className="keyends num"><span>0</span><span>1</span></div>
           </>)}
         </div>)}
-      {meta?.first_look && !step && <div className="demochip look"><b>First look.</b> About four months of NISAR data, not checked against ground measurements.</div>}
+      {meta?.first_look && !step && <div className="demochip look"><b>First look.</b> {layer && !layer.static ? `${Math.round((toDay(layer.dates[layer.dates.length - 1]) - toDay(layer.dates[0])) / 30)} months` : "A few months"} of NISAR data, not checked against ground measurements.</div>}
       {meta?.synthetic && <div className="demochip"><b>Demo data.</b> Radar layers are synthetic.</div>}
       {meta && layer && !pick && grid && !step && sheet === "peek" && <div className="hint">Tap the map to read one spot</div>}
       {showSettings && (

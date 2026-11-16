@@ -106,11 +106,12 @@ def first_look(folder, meta, ctx):
               f"That area moved the same way in {same} of its {len(steps)} steps between passes.",
               f"The two viewing directions agree on where the ground moved with a correlation of {agree:.2f} (1 would be perfect agreement, 0 none)."]
     if cov: points.append(f"NISAR got a usable reading in the study box on {pct(cov.get('asc', 0))} and {pct(cov.get('desc', 0))} of passes (its two directions).")
-    strong = agree >= 0.5 and same >= len(steps) - 1
+    strong = agree >= 0.5 and same >= 0.8 * len(steps)            # both directions agree, and at least four steps in five go the same way
     conclusion = (f"A first look: over {days} days the ground here {word} by about {val:.0f} cm in its most-changed area, "
                   + ("steadily and in both viewing directions." if strong else "but the two viewing directions only partly agree, so treat the pattern as tentative."))
-    sure = ("First look only. About four months of data, no GPS station, no second radar, and the stable reference area was chosen from a map, not from local knowledge. "
-            "Changes of a few centimetres are close to the noise in this record.")
+    sure = (f"First look only. {days} days of data, no GPS check, no second radar, and the stable reference area was chosen from a map, not from local knowledge. "
+            "Changes of a few centimetres are close to the noise in this record."
+            + (" Part of the wider pattern across this scene may be weather in the air, not ground motion." if abs(float(np.nanmedian(up[-1]))) > 2 else ""))
     return {"place": meta["name"], "kind": "first_look", "big": f"{val:.0f} cm", "big_note": f"the most-changed area {word}, {nice(d[0])} to {nice(d[-1])}",
             "conclusion": conclusion, "points": points, "sure": sure, "numbers": numbers}
 

@@ -137,9 +137,10 @@ def first_look(folder, meta, ctx):
                   + (f", and the radar matches {len(gps['stations'])} GPS stations to within about {gps['typical_difference_cm']:.0f} cm." if checked
                      else ", steadily and in both viewing directions." if strong
                      else ". The two viewing directions only partly agree on the pattern, so the size is better established than the exact shape."))
-    sure = (("Checked against GPS at the stations listed above. " if checked else "Compared with GPS where a station exists, as listed above. " if gps else "No GPS station here to compare against. ")
-            + "No second radar covers this period, and the stable reference area was chosen from a map. Changes of a few centimetres are close to the noise in this record."
-            + (" Part of the wider pattern across this scene may be weather in the air, not ground motion." if abs(float(np.nanmedian(up[-1]))) > 2 else ""))
+    sure = (f"Matches {len(gps['stations'])} GPS stations; no second radar to compare." if checked
+            else "Both viewing directions agree; " + ("one GPS station to compare." if gps else "no GPS station here to compare.") if strong
+            else f"Compared at {len(gps['stations'])} GPS stations, with mixed agreement." if gps
+            else "No GPS station here, and the two viewing directions only partly agree.")
     return {"place": meta["name"], "kind": "first_look", "tag": tag, "big": f"{val:.0f} cm", "big_note": f"the most-changed area {word}, {nice(d[0])} to {nice(d[-1])}",
             "conclusion": conclusion, "points": points, "sure": sure, "numbers": numbers}
 
@@ -160,14 +161,12 @@ for site in json.load(open(f"{root}/index.json")):
             points.insert(0, f"GPS station {st['id']} rose {rise:.1f} cm from {nice(st['dates'][lo])} to {nice(st['dates'][pk])}, then sank {fall:.1f} cm by {nice(st['dates'][hi])}.")
             conclusion = (f"The ground here rose slightly through the winter and then sank steadily from {calendar.month_name[day(st['dates'][pk]).month]} on, "
                           f"by {abs(n['moving_middle_cm']):.0f} cm across the sinking part of the study box and {abs(n['peak_cm']):.0f} cm at the deepest spot by {nice(n['to'])}.")
-            sure = (f"The first run disagreed with GPS by up to {meta['processing']['tie']['up']['largest_shift_cm']:.0f} cm, so every date is pinned to GPS station {st['id']}. "
-                    "That station sets the zero and is not an independent check. East-west motion is left out because the two viewing directions disagree.")
+            sure = f"Every date is pinned to GPS station {st['id']}, so that station is not an independent check."
         else:
             conclusion = (f"The slide moved the whole time from {nice(n['from'])} to {nice(n['to'])}, up to {abs(n['peak_cm']) / 100:.1f} m at its fastest spot. "
                           f"It sank fastest in {fast} and slowest in {slow}.")
             if n.get("nisar_minus_s1", 0) > 0.1: conclusion += " NISAR kept a reading on the slide far more often than Sentinel-1 did."
-            sure = ("The only GPS stations are off the slide, so the largest numbers have no ground measurement to confirm them. "
-                    f"The fastest spot went down in {n['peak_steps_down'][0]} of its {n['peak_steps_down'][1]} steps between passes, and its largest single step was {n['peak_largest_step_cm']:.0f} cm, so the total is not the product of one bad reading.")
+            sure = f"No GPS station sits on the slide, but the fastest spot went down in {n['peak_steps_down'][0]} of its {n['peak_steps_down'][1]} steps."
         out["sites"][site] = {"place": meta["name"], "kind": "motion", "big": big, "big_note": note, "conclusion": conclusion, "points": points, "sure": sure, "numbers": n}
     else:
         ev = meta["event"]; ss = meta["signal_series"]; n = {"landfall_utc": ev["utc"], "tracks": {}}; points = []; drops = []
@@ -185,7 +184,7 @@ for site in json.load(open(f"{root}/index.json")):
         points.append(f"Only {pct(n['area_with_reading'])} of the area gives a reading in both directions. The rest is water or ground the radar could not follow.")
         conclusion = (f"NISAR recorded Hurricane Isaias passing: signal quality fell by {pct(min(drops))} to {pct(max(drops))} in the passes that span landfall ({nice(ev['utc'])} UTC, the evening before in local time). "
                       "The two viewing directions do not agree on where the ground changed, so this is evidence of the storm, not a damage map.")
-        sure = f"The baseline is only {a['calm_passes']} calm passes per direction, and it includes heavy rain in early October. {ev.get('note', '')}"
+        sure = f"The calm baseline is only {a['calm_passes']} passes per direction, and storm figures are from reports at the time."
         out["sites"][site] = {"place": meta["name"], "kind": "event", "big": f"{pct(min(drops))} to {pct(max(drops))}", "big_note": f"drop in signal quality in the storm pass (landfall {nice(ev['utc'])} UTC)",
                               "conclusion": conclusion, "points": points, "sure": sure.strip(), "numbers": n}
 

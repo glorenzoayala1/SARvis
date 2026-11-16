@@ -128,7 +128,7 @@ button.ghost:hover:not(:disabled) { color: var(--ink); } button.ghost:disabled {
 @keyframes fill { from { width: 0; } to { width: 100%; } }
 button.finding { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; text-align: left; width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-left: 3px solid #eda100; border-radius: 10px; padding: 11px 12px; font-size: 13px; line-height: 1.4; color: var(--ink-2); animation: rise 0.4s ease both; transition: background 0.2s ease; }
 button.finding:hover { background: var(--surface-3); } button.finding b { color: var(--ink); font-variant-numeric: tabular-nums; } button.finding .em { font-size: 20px; } button.finding small { color: var(--ink-3); }
-@media (max-width: 800px) { .tour { top: calc(46dvh + 8px); } .panel header { display: block; } }
+@media (max-width: 800px) { .panel header { display: block; } }
 .touring .hide-on-tour { display: none; }
 .touring .tour { order: -1; }
 @media (max-width: 800px) { .touring header, .touring .banner { display: none; } }
@@ -426,3 +426,5 @@ button.brandchip { transition: background .15s, transform .12s; } button.brandch
   .finding button { font-size: 12px; padding: 6px 11px; min-height: 0; }
   .finding .looktag { font-size: 10px; padding: 1px 7px; }
 }
+
+.sheetbody > .tour { position: sticky; top: 0; flex: none; }

@@ -541,10 +541,15 @@ export default function Page() {
     const t1 = step.glow && setTimeout(() => {
       const card = document.getElementById(step.glow); if (!card) return;
       card.classList.add("spot");
-      if (step.glow !== "timebar") card.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "nearest" });
+      const body = bodyEl.current, tc = body?.querySelector(".tour");
+      if (step.glow !== "timebar" && body && body.contains(card)) {                      /* only the sheet scrolls, and the card being shown lands just under the demo card */
+        const top = card.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - (tc ? tc.offsetHeight + 12 : 0) - 14;
+        body.scrollTo({ top: Math.max(0, top), behavior: calm ? "auto" : "smooth" });
+      } else if (body) body.scrollTo({ top: 0, behavior: calm ? "auto" : "smooth" });
     }, 650);
     return () => clearTimeout(t1);
   }, [tour?.i, step, ready, hot?.i, hot?.j, layerKey, opt.view3d]);
+  useEffect(() => { if (bodyEl.current) bodyEl.current.scrollTop = 0; }, [tour?.i]);
   useEffect(() => {
     if (!tour?.auto) return;
     const id = setTimeout(() => setTour((v) => (v && v.i < steps.length - 1 ? { ...v, i: v.i + 1 } : null)), 7000);
@@ -1264,7 +1269,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
                     <button className="ghost" onClick={() => { if (st.id !== siteId) setSiteId(st.id); setSheet("peek"); }}>{st.id === siteId ? "Back to the map" : "Show me"}</button>
                   </div>); })}
               </div>
-              <p className="muted" style={{ margin: "12px 0 0" }}>Worked out from the data files on {found.generated} by <code>pipeline/findings.py</code>. Nothing here is typed in by hand.</p>
+              <p className="muted" style={{ margin: "12px 0 0" }}>Worked out from the data files on {found.generated} by <code>pipeline/findings.py</code>.</p>
             </>)}
           </div>
         )}

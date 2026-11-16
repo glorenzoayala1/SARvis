@@ -1062,7 +1062,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
               <div className="trow">
                 <button className="play" aria-label={playing ? "Pause" : "Play"} onClick={() => setPlaying((p) => !p)}>{playing ? "❚❚" : "▶"}</button>
                 <div className="tdate"><span className="muted">{speed ? "speed around" : `since ${fmtDate(layer.dates[0])}`}</span><b>{fmtDate(layer.dates[t])}</b></div>
-                <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} value={t} onChange={(e) => { setPlaying(false); setT(+e.target.value); }} />
+                <input aria-label="Date" type="range" min={0} max={layer.dates.length - 1} step="any" value={Math.min(layer.dates.length - 1, t + (playing ? fr : 0))} onChange={(e) => { setPlaying(false); setT(Math.round(+e.target.value)); }} />
               </div>
               <div className="row cap"><span>{opt.view3d && bars3d ? `column: 1 ${un} of change = ${Math.round((mPerCm / uf) * 10) / 10} m · land height ×${TERRAIN_X}${opt.clouds && cloudPct !== null ? ` · sky ${Math.round(cloudPct)}% cloud that day` : ""}` : `${opt.contours ? `lines every ${Math.round(contourStep * uf * 100) / 100} ${unit} · ` : ""}see-through = no reading`}</span></div>
             </>) : isImpact ? (<>

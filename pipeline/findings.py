@@ -91,6 +91,23 @@ def box_smooth(x, k=7):
         return c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]
     n = win(ok); return np.where(n > k * k / 2, win(v) / np.maximum(n, 1), np.nan)
 
+def gps_check(meta, ctx, up, d):
+    """Radar against every GPS station in the scene with a near-complete record: vertical change from the first to the last radar date."""
+    w, s, e, n = meta["bbox"]; nx, ny = meta["nx"], meta["ny"]; r = 2 if nx < 200 else 4; rows = []
+    for st in (ctx.get("gnss") or {}).get("stations", []):
+        i = int((st["lon"] - w) / (e - w) * nx); j = int((n - st["lat"]) / (n - s) * ny)
+        if not (0 <= i < nx and 0 <= j < ny): continue
+        rad = np.nanmedian(up[:, max(0, j - r):j + r + 1, max(0, i - r):i + r + 1].reshape(len(d), -1), axis=1)
+        gd = [day(x) for x in st["dates"]]; u = [np.nan if v is None else v for v in st["u"]]
+        g = np.array([np.nanmean([u[k] for k, q in enumerate(gd) if abs((q - day(x)).days) <= 3] or [np.nan]) for x in d]); g = g - g[0]
+        if np.isfinite(rad[-1]) and np.isfinite(g[-1]) and np.isfinite(g).sum() > 0.7 * len(d) and np.isfinite(rad).sum() > 0.7 * len(d):
+            rows.append({"id": st["id"], "radar_cm": round(float(rad[-1]), 1), "gps_cm": round(float(g[-1]), 1)})
+    if not rows: return None
+    x = np.array([[q["radar_cm"], q["gps_cm"]] for q in rows]); diff = x[:, 0] - x[:, 1]
+    out = {"stations": rows, "typical_difference_cm": round(float(np.median(np.abs(diff))), 1)}
+    if len(rows) >= 5: out["correlation"] = round(float(np.corrcoef(x[:, 0], x[:, 1])[0, 1]), 2)
+    return out
+
 def first_look(folder, meta, ctx):
     L = {l["key"]: l for l in meta["layers"]}; up = grid(folder, meta, L["up"]); d = L["up"]["dates"]
     sm = box_smooth(up[-1]); lo, hi = np.nanpercentile(sm, 1), np.nanpercentile(sm, 99)
@@ -107,12 +124,23 @@ def first_look(folder, meta, ctx):
               f"The two viewing directions agree on where the ground moved with a correlation of {agree:.2f} (1 would be perfect agreement, 0 none)."]
     if cov: points.append(f"NISAR got a usable reading in the study box on {pct(cov.get('asc', 0))} and {pct(cov.get('desc', 0))} of passes (its two directions).")
     strong = agree >= 0.5 and same >= 0.8 * len(steps)            # both directions agree, and at least four steps in five go the same way
-    conclusion = (f"A first look: over {days} days the ground here {word} by about {val:.0f} cm in its most-changed area, "
-                  + ("steadily and in both viewing directions." if strong else "but the two viewing directions only partly agree, so treat the pattern as tentative."))
-    sure = (f"First look only. {days} days of data, no GPS check, no second radar, and the stable reference area was chosen from a map, not from local knowledge. "
-            "Changes of a few centimetres are close to the noise in this record."
+    import warnings
+    with warnings.catch_warnings(): warnings.simplefilter("ignore"); gps = gps_check(meta, ctx, up, d)
+    months = round(days / 30.4); checked = False
+    if gps:
+        numbers["gps"] = gps; k = len(gps["stations"])
+        checked = k >= 5 and gps.get("correlation", 0) >= 0.7 and gps["typical_difference_cm"] <= 3          # many stations, and radar tracks them
+        if k >= 5: points.append(f"Against {k} GPS stations, radar and GPS differ by {gps['typical_difference_cm']:.1f} cm at the typical station, and stations that moved more on GPS moved more on radar (correlation {gps['correlation']:.2f}).")
+        else: points.append("GPS comparison: " + "; ".join(f"at station {q['id']} radar measured {q['radar_cm']:+.1f} cm and GPS {q['gps_cm']:+.1f} cm" for q in gps["stations"]) + ".")
+    tag = f"{months} months of data" + (f" · matches {len(gps['stations'])} GPS stations" if checked else " · both directions agree" if strong else f" · {len(gps['stations'])} GPS station{'s' if len(gps['stations']) > 1 else ''} compared" if gps else "")
+    conclusion = (f"Over {days} days the ground here {word} by about {val:.0f} cm in its most-changed area"
+                  + (f", and the radar matches {len(gps['stations'])} GPS stations to within about {gps['typical_difference_cm']:.0f} cm." if checked
+                     else ", steadily and in both viewing directions." if strong
+                     else ". The two viewing directions only partly agree on the pattern, so the size is better established than the exact shape."))
+    sure = (("Checked against GPS at the stations listed above. " if checked else "Compared with GPS where a station exists, as listed above. " if gps else "No GPS station here to compare against. ")
+            + "No second radar covers this period, and the stable reference area was chosen from a map. Changes of a few centimetres are close to the noise in this record."
             + (" Part of the wider pattern across this scene may be weather in the air, not ground motion." if abs(float(np.nanmedian(up[-1]))) > 2 else ""))
-    return {"place": meta["name"], "kind": "first_look", "big": f"{val:.0f} cm", "big_note": f"the most-changed area {word}, {nice(d[0])} to {nice(d[-1])}",
+    return {"place": meta["name"], "kind": "first_look", "tag": tag, "big": f"{val:.0f} cm", "big_note": f"the most-changed area {word}, {nice(d[0])} to {nice(d[-1])}",
             "conclusion": conclusion, "points": points, "sure": sure, "numbers": numbers}
 
 out = {"generated": dt.date.today().isoformat(), "sites": {}}

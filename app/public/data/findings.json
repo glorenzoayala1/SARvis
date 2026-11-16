@@ -197,16 +197,18 @@
   "mexico-city": {
    "place": "Mexico City subsidence, Mexico",
    "kind": "first_look",
+   "tag": "11 months of data \u00b7 both directions agree",
    "big": "22 cm",
    "big_note": "the most-changed area sank, 6 Nov 2025 to 8 Oct 2026",
-   "conclusion": "A first look: over 336 days the ground here sank by about 22 cm in its most-changed area, steadily and in both viewing directions.",
+   "conclusion": "Over 336 days the ground here sank by about 22 cm in its most-changed area, steadily and in both viewing directions.",
    "points": [
     "Between 6 Nov 2025 and 8 Oct 2026 (336 days) the most-changed 1% of the area sank 22.0 cm (middle value, after averaging over about 500 m).",
     "That area moved the same way in 21 of its 25 steps between passes.",
     "The two viewing directions agree on where the ground moved with a correlation of 0.97 (1 would be perfect agreement, 0 none).",
-    "NISAR got a usable reading in the study box on 88% and 74% of passes (its two directions)."
+    "NISAR got a usable reading in the study box on 88% and 74% of passes (its two directions).",
+    "GPS comparison: at station MMX1 radar measured -19.8 cm and GPS -24.7 cm."
    ],
-   "sure": "First look only. 336 days of data, no GPS check, no second radar, and the stable reference area was chosen from a map, not from local knowledge. Changes of a few centimetres are close to the noise in this record. Part of the wider pattern across this scene may be weather in the air, not ground motion.",
+   "sure": "Compared with GPS where a station exists, as listed above. No second radar covers this period, and the stable reference area was chosen from a map. Changes of a few centimetres are close to the noise in this record. Part of the wider pattern across this scene may be weather in the air, not ground motion.",
    "numbers": {
     "from": "20251106",
     "to": "20261008",
@@ -225,22 +227,34 @@
     "coverage": {
      "asc": 0.876,
      "desc": 0.737
+    },
+    "gps": {
+     "stations": [
+      {
+       "id": "MMX1",
+       "radar_cm": -19.8,
+       "gps_cm": -24.7
+      }
+     ],
+     "typical_difference_cm": 4.9
     }
    }
   },
   "reykjanes": {
    "place": "Reykjanes peninsula, Iceland",
    "kind": "first_look",
+   "tag": "11 months of data \u00b7 3 GPS stations compared",
    "big": "22 cm",
    "big_note": "the most-changed area rose, 15 Nov 2025 to 5 Oct 2026",
-   "conclusion": "A first look: over 324 days the ground here rose by about 22 cm in its most-changed area, but the two viewing directions only partly agree, so treat the pattern as tentative.",
+   "conclusion": "Over 324 days the ground here rose by about 22 cm in its most-changed area. The two viewing directions only partly agree on the pattern, so the size is better established than the exact shape.",
    "points": [
     "Between 15 Nov 2025 and 5 Oct 2026 (324 days) the most-changed 1% of the area rose 22.4 cm (middle value, after averaging over about 500 m).",
     "That area moved the same way in 17 of its 24 steps between passes.",
     "The two viewing directions agree on where the ground moved with a correlation of 0.46 (1 would be perfect agreement, 0 none).",
-    "NISAR got a usable reading in the study box on 78% and 97% of passes (its two directions)."
+    "NISAR got a usable reading in the study box on 78% and 97% of passes (its two directions).",
+    "GPS comparison: at station AUSV radar measured +0.3 cm and GPS +8.4 cm; at station GEVK radar measured -0.9 cm and GPS +8.5 cm; at station SENG radar measured +20.3 cm and GPS +21.6 cm."
    ],
-   "sure": "First look only. 324 days of data, no GPS check, no second radar, and the stable reference area was chosen from a map, not from local knowledge. Changes of a few centimetres are close to the noise in this record. Part of the wider pattern across this scene may be weather in the air, not ground motion.",
+   "sure": "Compared with GPS where a station exists, as listed above. No second radar covers this period, and the stable reference area was chosen from a map. Changes of a few centimetres are close to the noise in this record. Part of the wider pattern across this scene may be weather in the air, not ground motion.",
    "numbers": {
     "from": "20251115",
     "to": "20261005",
@@ -259,22 +273,44 @@
     "coverage": {
      "asc": 0.775,
      "desc": 0.974
+    },
+    "gps": {
+     "stations": [
+      {
+       "id": "AUSV",
+       "radar_cm": 0.3,
+       "gps_cm": 8.4
+      },
+      {
+       "id": "GEVK",
+       "radar_cm": -0.9,
+       "gps_cm": 8.5
+      },
+      {
+       "id": "SENG",
+       "radar_cm": 20.3,
+       "gps_cm": 21.6
+      }
+     ],
+     "typical_difference_cm": 8.1
     }
    }
   },
   "kilauea": {
    "place": "Kilauea volcano, Hawaii",
    "kind": "first_look",
+   "tag": "11 months of data \u00b7 matches 15 GPS stations",
    "big": "14 cm",
    "big_note": "the most-changed area sank, 15 Nov 2025 to 5 Oct 2026",
-   "conclusion": "A first look: over 324 days the ground here sank by about 14 cm in its most-changed area, but the two viewing directions only partly agree, so treat the pattern as tentative.",
+   "conclusion": "Over 324 days the ground here sank by about 14 cm in its most-changed area, and the radar matches 15 GPS stations to within about 2 cm.",
    "points": [
     "Between 15 Nov 2025 and 5 Oct 2026 (324 days) the most-changed 1% of the area sank 13.9 cm (middle value, after averaging over about 500 m).",
     "That area moved the same way in 16 of its 23 steps between passes.",
     "The two viewing directions agree on where the ground moved with a correlation of 0.47 (1 would be perfect agreement, 0 none).",
-    "NISAR got a usable reading in the study box on 78% and 68% of passes (its two directions)."
+    "NISAR got a usable reading in the study box on 78% and 68% of passes (its two directions).",
+    "Against 15 GPS stations, radar and GPS differ by 2.3 cm at the typical station, and stations that moved more on GPS moved more on radar (correlation 0.73)."
    ],
-   "sure": "First look only. 324 days of data, no GPS check, no second radar, and the stable reference area was chosen from a map, not from local knowledge. Changes of a few centimetres are close to the noise in this record. Part of the wider pattern across this scene may be weather in the air, not ground motion.",
+   "sure": "Checked against GPS at the stations listed above. No second radar covers this period, and the stable reference area was chosen from a map. Changes of a few centimetres are close to the noise in this record. Part of the wider pattern across this scene may be weather in the air, not ground motion.",
    "numbers": {
     "from": "20251115",
     "to": "20261005",
@@ -293,22 +329,104 @@
     "coverage": {
      "asc": 0.775,
      "desc": 0.683
+    },
+    "gps": {
+     "stations": [
+      {
+       "id": "AHUP",
+       "radar_cm": -10.9,
+       "gps_cm": -5.9
+      },
+      {
+       "id": "BYRL",
+       "radar_cm": 1.3,
+       "gps_cm": 0.4
+      },
+      {
+       "id": "CRIM",
+       "radar_cm": -8.8,
+       "gps_cm": -4.6
+      },
+      {
+       "id": "DVLT",
+       "radar_cm": -6.0,
+       "gps_cm": -3.6
+      },
+      {
+       "id": "KERZ",
+       "radar_cm": -9.2,
+       "gps_cm": -7.5
+      },
+      {
+       "id": "KOSM",
+       "radar_cm": -3.0,
+       "gps_cm": -8.6
+      },
+      {
+       "id": "KTPM",
+       "radar_cm": -0.4,
+       "gps_cm": -2.1
+      },
+      {
+       "id": "MALU",
+       "radar_cm": -6.0,
+       "gps_cm": -5.9
+      },
+      {
+       "id": "MANE",
+       "radar_cm": -2.5,
+       "gps_cm": -1.4
+      },
+      {
+       "id": "MKAI",
+       "radar_cm": -3.5,
+       "gps_cm": -4.5
+      },
+      {
+       "id": "MMAU",
+       "radar_cm": -6.9,
+       "gps_cm": -7.3
+      },
+      {
+       "id": "NUPM",
+       "radar_cm": -7.9,
+       "gps_cm": -5.2
+      },
+      {
+       "id": "OUTL",
+       "radar_cm": -10.6,
+       "gps_cm": -8.3
+      },
+      {
+       "id": "PUHR",
+       "radar_cm": -7.3,
+       "gps_cm": -3.8
+      },
+      {
+       "id": "UWEV",
+       "radar_cm": 0.6,
+       "gps_cm": 3.4
+      }
+     ],
+     "typical_difference_cm": 2.3,
+     "correlation": 0.73
     }
    }
   },
   "semarang": {
    "place": "Semarang subsidence, Indonesia",
    "kind": "first_look",
+   "tag": "3 months of data \u00b7 both directions agree",
    "big": "6 cm",
    "big_note": "the most-changed area sank, 25 Jun 2026 to 29 Sep 2026",
-   "conclusion": "A first look: over 96 days the ground here sank by about 6 cm in its most-changed area, steadily and in both viewing directions.",
+   "conclusion": "Over 96 days the ground here sank by about 6 cm in its most-changed area, steadily and in both viewing directions.",
    "points": [
     "Between 25 Jun 2026 and 29 Sep 2026 (96 days) the most-changed 1% of the area sank 5.9 cm (middle value, after averaging over about 500 m).",
     "That area moved the same way in 7 of its 7 steps between passes.",
     "The two viewing directions agree on where the ground moved with a correlation of 0.64 (1 would be perfect agreement, 0 none).",
     "NISAR got a usable reading in the study box on 75% and 74% of passes (its two directions)."
    ],
-   "sure": "First look only. 96 days of data, no GPS check, no second radar, and the stable reference area was chosen from a map, not from local knowledge. Changes of a few centimetres are close to the noise in this record.",
+   "sure": "No GPS station here to compare against. No second radar covers this period, and the stable reference area was chosen from a map. Changes of a few centimetres are close to the noise in this record.",
    "numbers": {
     "from": "20260625",
     "to": "20260929",
@@ -333,16 +451,17 @@
   "delhi": {
    "place": "Delhi subsidence, India",
    "kind": "first_look",
+   "tag": "10 months of data",
    "big": "8 cm",
    "big_note": "the most-changed area sank, 29 Nov 2025 to 7 Oct 2026",
-   "conclusion": "A first look: over 312 days the ground here sank by about 8 cm in its most-changed area, but the two viewing directions only partly agree, so treat the pattern as tentative.",
+   "conclusion": "Over 312 days the ground here sank by about 8 cm in its most-changed area. The two viewing directions only partly agree on the pattern, so the size is better established than the exact shape.",
    "points": [
     "Between 29 Nov 2025 and 7 Oct 2026 (312 days) the most-changed 1% of the area sank 8.1 cm (middle value, after averaging over about 500 m).",
     "That area moved the same way in 20 of its 28 steps between passes.",
     "The two viewing directions agree on where the ground moved with a correlation of 0.40 (1 would be perfect agreement, 0 none).",
     "NISAR got a usable reading in the study box on 81% and 78% of passes (its two directions)."
    ],
-   "sure": "First look only. 312 days of data, no GPS check, no second radar, and the stable reference area was chosen from a map, not from local knowledge. Changes of a few centimetres are close to the noise in this record.",
+   "sure": "No GPS station here to compare against. No second radar covers this period, and the stable reference area was chosen from a map. Changes of a few centimetres are close to the noise in this record.",
    "numbers": {
     "from": "20251129",
     "to": "20261007",
@@ -367,16 +486,17 @@
   "campi-flegrei": {
    "place": "Campi Flegrei, Italy",
    "kind": "first_look",
+   "tag": "4 months of data",
    "big": "3 cm",
    "big_note": "the most-changed area rose, 24 Jun 2026 to 10 Oct 2026",
-   "conclusion": "A first look: over 108 days the ground here rose by about 3 cm in its most-changed area, but the two viewing directions only partly agree, so treat the pattern as tentative.",
+   "conclusion": "Over 108 days the ground here rose by about 3 cm in its most-changed area. The two viewing directions only partly agree on the pattern, so the size is better established than the exact shape.",
    "points": [
     "Between 24 Jun 2026 and 10 Oct 2026 (108 days) the most-changed 1% of the area rose 2.7 cm (middle value, after averaging over about 500 m).",
     "That area moved the same way in 5 of its 8 steps between passes.",
     "The two viewing directions agree on where the ground moved with a correlation of 0.18 (1 would be perfect agreement, 0 none).",
     "NISAR got a usable reading in the study box on 52% and 50% of passes (its two directions)."
    ],
-   "sure": "First look only. 108 days of data, no GPS check, no second radar, and the stable reference area was chosen from a map, not from local knowledge. Changes of a few centimetres are close to the noise in this record.",
+   "sure": "No GPS station here to compare against. No second radar covers this period, and the stable reference area was chosen from a map. Changes of a few centimetres are close to the noise in this record.",
    "numbers": {
     "from": "20260624",
     "to": "20261010",

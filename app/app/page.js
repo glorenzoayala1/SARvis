@@ -188,7 +188,7 @@ export default function Page() {
       // Zoom all the way out and the map becomes the Earth in space, with that day's real cloud from NASA's VIIRS satellite image.
       try {
         m.setProjection({ type: ["interpolate", ["linear"], ["zoom"], 5.5, "vertical-perspective", GLOBE_ABOVE, "mercator"] });
-        m.setSky({ "sky-color": "#3d7bd6", "horizon-color": "#dfeaf5", "fog-color": "#dfeaf5", "sky-horizon-blend": 0.65, "horizon-fog-blend": 0.7, "fog-ground-blend": 0.7, "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0] });
+        m.setSky({ "sky-color": "#3d7bd6", "horizon-color": "#dfeaf5", "fog-color": "#dfeaf5", "sky-horizon-blend": 0.65, "horizon-fog-blend": 0.7, "fog-ground-blend": 0.5, "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0] });
         if (!m.getSource("earth")) {
           m.addSource("earth", { type: "raster", tileSize: 256, maxzoom: 8, attribution: "NASA GIBS / VIIRS",
             tiles: [`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/${EARTH_DAY}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`] });
@@ -719,7 +719,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
       zoom3d.current = z3; home3d.current = { center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3 }; setCam3d(camAlt3d.current);
       const here = m.getCenter(), tc = cam?.center || { lng: (f[0] + f[2]) / 2, lat: (f[1] + f[3]) / 2 }, tl = tc.lng ?? tc[0], tt = tc.lat ?? tc[1];
       const hop = Math.hypot((here.lng - tl) * Math.cos((tt * Math.PI) / 180), here.lat - tt) > 0.8;            // the new place is far away: rise up, cross over, come down
-      const far = m.getZoom() < 9 || hop, to = { center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: -18, essential: true };
+      const far = m.getZoom() < 9 || hop, to = { center: cam?.center || [(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], zoom: z3, pitch: 77, bearing: meta.bearing3d ?? -18, essential: true };
       try { m.setMaxPitch(84); } catch (e) {}
       if (!calm) arrive(m);
       if (far && !calm) m.flyTo({ ...to, duration: hop ? 7000 : 5200, curve: hop ? 1.55 : 1.3 }); else m.easeTo({ ...to, duration: calm ? 0 : 1800 });
@@ -792,11 +792,13 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         const d = cloudData.current, L = this.loc, mm = map.current; if (!d.on || !mm) return;
         if (mm.getZoom() < GLOBE_ABOVE + 0.2) return;                   // zoomed out, the map is a globe and has its own sky
         const mx = args?.defaultProjectionData?.mainMatrix || args?.modelViewProjectionMatrix || args;
-        const c = maplibregl.MercatorCoordinate.fromLngLat([d.lon0, d.lat0], d.alt), u = c.meterInMercatorCoordinateUnits() * 1000;
+        // the layer sits a set height above the ground where you are looking, so it is overhead at sea level and on a 2,200 m plateau alike
+        const ground = mm.transform.elevation || 0, deck = ground + d.alt;
+        const c = maplibregl.MercatorCoordinate.fromLngLat([d.lon0, d.lat0], deck), u = c.meterInMercatorCoordinateUnits() * 1000;
         // is the camera under the layer (look along its underside) or over it (look down through it)?
         const tr = mm.transform, ppm = (512 * 2 ** mm.getZoom()) / (40075016.686 * Math.cos((mm.getCenter().lat * Math.PI) / 180));      // screen pixels per metre at the map centre
-        const camAlt = (Math.cos((mm.getPitch() * Math.PI) / 180) * tr.cameraToCenterDistance) / ppm + (tr.elevation || 0) * TERRAIN_X;
-        const below = Math.min(1, Math.max(0, (d.alt - camAlt) / 150)), sec = (performance.now() - d.t0) / 1000;
+        const camAlt = (Math.cos((mm.getPitch() * Math.PI) / 180) * tr.cameraToCenterDistance) / ppm + ground;
+        const below = Math.min(1, Math.max(0, (deck - camAlt) / 150)), sec = (performance.now() - d.t0) / 1000;
         // where the camera stands, in km east and north of the site centre: haze thickens with distance from there
         const ctr = mm.getCenter(), br = (mm.getBearing() * Math.PI) / 180, back = (Math.sin((mm.getPitch() * Math.PI) / 180) * tr.cameraToCenterDistance) / ppm / 1000;
         const camE = (ctr.lng - d.lon0) * 111.32 * Math.cos((d.lat0 * Math.PI) / 180) - Math.sin(br) * back, camN = (ctr.lat - d.lat0) * 110.54 - Math.cos(br) * back;
@@ -810,7 +812,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
         const nVert = o / 5;
         gl.useProgram(this.pr); if (this.vao) gl.bindVertexArray(this.vao); gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, 20, 0); gl.enableVertexAttribArray(L.km); gl.vertexAttribPointer(L.km, 2, gl.FLOAT, false, 20, 12);
-        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.t, d.calm ? 0 : sec); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x + camE * u, c.y - camN * u, c.z); gl.uniform1f(L.reach, Math.max(0.15, Math.abs(d.alt - camAlt) / 1000));     // haze starts a little past the point the camera looks at, at any zoom
+        gl.uniformMatrix4fv(L.m, false, mx); gl.uniform2f(L.off, d.ox - d.vx * sec, d.oy - d.vy * sec); gl.uniform1f(L.cover, d.cover); gl.uniform1f(L.t, d.calm ? 0 : sec); gl.uniform1f(L.below, below); gl.uniform2f(L.cam, camE, camN); gl.uniform3f(L.ctr, c.x + camE * u, c.y - camN * u, c.z); gl.uniform1f(L.reach, Math.max(0.15, Math.abs(deck - camAlt) / 1000));     // haze starts a little past the point the camera looks at, at any zoom
         gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         gl.enable(gl.DEPTH_TEST);                                                                               // land and columns stay in front of everything drawn here
         gl.uniform1f(L.ground, 0); gl.drawArrays(gl.TRIANGLES, 0, nVert);                                       // the cloud layer
@@ -1026,7 +1028,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
             <div className="keyends num"><span>0</span><span>1</span></div>
           </>)}
         </div>)}
-      {meta?.first_look && !step && <div className="demochip look"><b>First look.</b> {layer && !layer.static ? `${Math.round((toDay(layer.dates[layer.dates.length - 1]) - toDay(layer.dates[0])) / 30)} months` : "A few months"} of NISAR data, not checked against ground measurements.</div>}
+      {meta?.first_look && !step && found?.sites?.[meta.id]?.tag && <div className="demochip look">{found.sites[meta.id].tag}</div>}
       {meta?.synthetic && <div className="demochip"><b>Demo data.</b> Radar layers are synthetic.</div>}
       {meta && layer && !pick && grid && !step && sheet === "peek" && <div className="hint">Tap the map to read one spot</div>}
       {showSettings && (
@@ -1252,7 +1254,7 @@ const CLOUD_SPEEDUP = 12;      // clouds drift at 12 times that day's average wi
               <div className="found">
                 {sites.filter((st) => found.sites[st.id]).map((st) => { const f = found.sites[st.id]; return (
                   <div key={st.id} className={"card finding" + (st.id === siteId ? " here" : "")}>
-                    {f.kind === "first_look" && <div className="looktag">First look</div>}
+                    {f.tag && <div className="looktag">{f.tag}</div>}
                     <h2>{f.place}</h2>
                     <div className="hero">{f.big}</div>
                     <div className="muted heronote">{f.big_note}</div>
